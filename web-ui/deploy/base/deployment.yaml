@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-copilot-ui
+  namespace: kube-copilot-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-copilot-ui
+  template:
+    metadata:
+      labels:
+        app: kube-copilot-ui
+    spec:
+      serviceAccountName: kube-copilot-ui
+      imagePullSecrets:
+        - name: quay-pull-secret
+      containers:
+        - name: ui
+          image: quay.io/gfontana/kube-copilot-agent-ui:v1.0
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: WEBUI_NAMESPACE
+              value: "kube-copilot-agent"
+            # WEBUI_COMMAND_TIMEOUT controls how long (seconds) the backend polls
+            # for a KubeCopilotMessage response before giving up (default: 300)
+            - name: WEBUI_COMMAND_TIMEOUT
+              value: "300"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"

@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KubeCopilot</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+  <style>
+    :root { --sidebar-w: 290px; }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%; overflow: hidden;
+      font-size: 15px;
+    }
+
+    body { display: flex; flex-direction: column; }
+
+    /* ── Header ── */
+    .app-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid var(--pico-muted-border-color);
+      flex-shrink: 0;
+    }
+    .app-header h1 { margin: 0; font-size: 1.1rem; }
+    .session-badge {
+      font-size: 0.7rem; font-family: monospace;
+      color: var(--pico-muted-color);
+      background: var(--pico-secondary-background);
+      padding: 0.2rem 0.5rem; border-radius: 0.3rem;
+      max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* ── Layout ── */
+    .layout {
+      display: flex; flex: 1; overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: var(--sidebar-w); min-width: var(--sidebar-w);
+      border-right: 1px solid var(--pico-muted-border-color);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .sidebar-top { padding: 0.75rem; border-bottom: 1px solid var(--pico-muted-border-color); }
+    .sidebar-top label { font-size: 0.75rem; margin-bottom: 0.25rem; display: block; color: var(--pico-muted-color); }
+    .sidebar-top select { margin: 0; font-size: 0.85rem; }
+
+    .new-btn {
+      margin: 0.5rem 0.75rem;
+      font-size: 0.82rem;
+      padding: 0.4rem 0.75rem;
+    }
+
+    .session-list-header {
+      padding: 0 0.75rem 0.25rem;
+      font-size: 0.72rem;
+      color: var(--pico-muted-color);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .session-list {
+      overflow-y: auto; padding: 0 0.5rem 0.5rem;
+    }
+    .session-list.previous-list {
+      flex: 1;
+    }
+
+    .running-sessions-list {
+      padding: 0 0.5rem 0.25rem;
+    }
+
+    .session-item.running {
+      border-color: color-mix(in srgb, var(--pico-primary) 50%, transparent);
+      background: color-mix(in srgb, var(--pico-primary) 6%, transparent);
+    }
+    .session-item.running .session-preview::before {
+      content: '⏳ ';
+    }
+
+    .session-item {
+      padding: 0.55rem 0.7rem; border-radius: 0.4rem;
+      cursor: pointer; margin-bottom: 0.2rem;
+      border: 1px solid transparent;
+      transition: background 0.1s;
+      display: flex; align-items: flex-start; gap: 0.4rem;
+    }
+    .session-item:hover { background: var(--pico-secondary-background); }
+    .session-item.active {
+      border-color: var(--pico-primary);
+      background: color-mix(in srgb, var(--pico-primary) 12%, transparent);
+    }
+    .session-item-body {
+      flex: 1; min-width: 0;
+    }
+    .session-preview {
+      font-size: 0.8rem;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .session-meta {
+      font-size: 0.68rem; font-family: monospace;
+      color: var(--pico-muted-color);
+      margin-top: 0.15rem;
+    }
+    .session-delete-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--pico-muted-color); font-size: 0.9rem;
+      padding: 0.1rem 0.2rem; border-radius: 0.2rem;
+      flex-shrink: 0; opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+      line-height: 1;
+    }
+    .session-item:hover .session-delete-btn { opacity: 1; }
+    .session-delete-btn:hover { color: var(--pico-del-color, #e57373); }
+    .no-sessions {
+      font-size: 0.8rem; color: var(--pico-muted-color);
+      padding: 0.5rem 0.5rem; text-align: center;
+    }
+
+    /* ── Chat area ── */
+    .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .messages {
+      flex: 1; overflow-y: auto;
+      padding: 1rem 1.25rem;
+      display: flex; flex-direction: column; gap: 0.8rem;
+    }
+
+    .empty-state {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: var(--pico-muted-color); text-align: center; gap: 0.5rem;
+    }
+    .empty-state .icon { font-size: 3rem; }
+    .empty-state p { margin: 0; }
+
+    /* ── Message bubbles ── */
+    .msg-row { display: flex; gap: 0.5rem; }
+    .msg-row.user { flex-direction: row-reverse; }
+
+    .bubble {
+      max-width: min(75%, 680px);
+      padding: 0.6rem 0.9rem;
+      border-radius: 1rem;
+      line-height: 1.55;
+      word-break: break-word;
+    }
+    .msg-row.user .bubble {
+      background: #5b4fcf;
+      color: #ffffff;
+      border-bottom-right-radius: 0.2rem;
+    }
+    .msg-row.assistant .bubble {
+      background: var(--pico-card-background-color, var(--pico-secondary-background));
+      border: 1px solid var(--pico-muted-border-color);
+      border-bottom-left-radius: 0.2rem;
+    }
+
+    /* Markdown inside bubbles */
+    .bubble p { margin: 0 0 0.5rem; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble pre {
+      background: var(--pico-code-background-color, #1e1e2e);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.4rem;
+      padding: 0.75rem;
+      overflow-x: auto;
+      font-size: 0.8rem;
+      margin: 0.5rem 0;
+    }
+    .bubble code { font-size: 0.82em; }
+    .bubble pre code { font-size: inherit; background: none; padding: 0; border: none; }
+    .bubble h4, .bubble h5, .bubble h6 { margin: 0.75rem 0 0.25rem; }
+    .bubble ul, .bubble ol { margin: 0.25rem 0; padding-left: 1.4rem; }
+    .bubble li { margin: 0.15rem 0; }
+    .bubble table { font-size: 0.82em; width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+    .bubble th, .bubble td { border: 1px solid var(--pico-muted-border-color); padding: 0.3rem 0.5rem; }
+    .bubble blockquote { border-left: 3px solid var(--pico-muted-border-color); margin: 0.5rem 0; padding-left: 0.75rem; color: var(--pico-muted-color); }
+
+    /* ── Typing indicator ── */
+    .typing-row { display: flex; }
+    .typing-bubble {
+      background: var(--pico-card-background-color, var(--pico-secondary-background));
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 1rem; border-bottom-left-radius: 0.2rem;
+      padding: 0.65rem 1rem;
+      display: flex; gap: 5px; align-items: center;
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--pico-muted-color);
+      animation: bounce 1.3s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.18s; }
+    .dot:nth-child(3) { animation-delay: 0.36s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.6; }
+      40% { transform: translateY(-6px); opacity: 1; }
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      min-height: 1.4rem;
+      font-size: 0.73rem;
+      color: var(--pico-muted-color);
+      padding: 0.1rem 1.25rem;
+      text-align: center;
+    }
+
+    /* ── Activity panel ── */
+    .activity-panel {
+      border-top: 1px solid var(--pico-muted-border-color);
+      background: var(--pico-background-color);
+      display: flex; flex-direction: column;
+      transition: height 0.2s ease;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .activity-panel.collapsed { height: 2.1rem; }
+    .activity-panel.expanded  { height: 220px; }
+
+    .activity-header {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.35rem 1.25rem;
+      cursor: pointer; user-select: none;
+      font-size: 0.75rem; color: var(--pico-muted-color);
+      flex-shrink: 0;
+    }
+    .activity-header:hover { color: var(--pico-color); }
+    .activity-toggle { font-size: 0.65rem; margin-left: auto; }
+    .activity-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--pico-muted-color); flex-shrink: 0;
+    }
+    .activity-dot.live { background: #4caf50; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    .activity-log {
+      flex: 1; overflow-y: auto;
+      padding: 0.25rem 1.25rem 0.5rem;
+      display: flex; flex-direction: column; gap: 0.2rem;
+      font-family: monospace; font-size: 0.72rem;
+    }
+    .chunk-row {
+      display: flex; gap: 0.4rem; align-items: flex-start;
+      padding: 0.15rem 0;
+      border-bottom: 1px solid var(--pico-muted-border-color);
+      opacity: 0.9;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:0.9;transform:none} }
+    .chunk-icon { flex-shrink: 0; width: 1.2rem; text-align: center; }
+    .chunk-content {
+      flex: 1; white-space: pre-wrap; word-break: break-word;
+      color: var(--pico-color); line-height: 1.4;
+    }
+    .chunk-row.tool_call   .chunk-content { color: #82aaff; }
+    .chunk-row.tool_result .chunk-content { color: #c3e88d; }
+    .chunk-row.response    .chunk-content { color: #89ddff; }
+    .chunk-row.error       .chunk-content { color: #f07178; }
+    .chunk-row.info        .chunk-content { color: var(--pico-muted-color); }
+    .activity-empty {
+      color: var(--pico-muted-color); font-size: 0.72rem; font-style: italic;
+      padding: 0.5rem 0;
+    }
+
+    /* ── Input area ── */
+    .input-area {
+      padding: 0.75rem 1.25rem;
+      border-top: 1px solid var(--pico-muted-border-color);
+      display: flex; gap: 0.5rem; align-items: flex-end;
+    }
+    .input-area textarea {
+      flex: 1; margin: 0; resize: none;
+      min-height: 2.5rem; max-height: 9rem;
+      overflow-y: auto; font-size: 0.9rem;
+      line-height: 1.4;
+    }
+    .input-area button { margin: 0; flex-shrink: 0; height: 2.5rem; padding: 0 1.1rem; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="app-header">
+  <h1>🤖 KubeCopilot</h1>
+  <span class="session-badge" id="sessionBadge">No session</span>
+</div>
+
+<!-- Main layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <label for="agentSelect">Agent</label>
+      <select id="agentSelect"><option value="">Loading…</option></select>
+    </div>
+    <button class="new-btn outline" onclick="newSession()">+ New session</button>
+    <div class="session-list-header" id="runningHeader" style="display:none">Running Sessions</div>
+    <div class="running-sessions-list" id="runningSessionsList"></div>
+    <div class="session-list-header">Previous sessions</div>
+    <div class="session-list previous-list" id="sessionList">
+      <p class="no-sessions">Loading…</p>
+    </div>
+  </aside>
+
+  <!-- Chat -->
+  <main class="chat-area">
+    <div class="messages" id="messages">
+      <div class="empty-state" id="emptyState">
+        <div class="icon">💬</div>
+        <p><strong>Select an agent and start chatting</strong></p>
+        <p>Or pick a previous session from the sidebar.</p>
+      </div>
+    </div>
+    <div class="status-bar" id="statusBar"></div>
+
+    <!-- Activity panel -->
+    <div class="activity-panel collapsed" id="activityPanel">
+      <div class="activity-header" onclick="toggleActivity()">
+        <div class="activity-dot" id="activityDot"></div>
+        <span>🔍 Agent Activity</span>
+        <span class="activity-toggle" id="activityToggle">▲ expand</span>
+      </div>
+      <div class="activity-log" id="activityLog">
+        <div class="activity-empty">No activity yet for this session.</div>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <textarea id="msgInput"
+        placeholder="Ask the cluster sysadmin anything… (Enter to send, Shift+Enter for newline)"
+        rows="1"
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this)"></textarea>
+      <button id="sendBtn" onclick="sendMessage()">Send</button>
+      <button id="stopBtn" onclick="cancelMessage()" style="display:none" class="secondary">⛔ Stop</button>
+    </div>
+  </main>
+
+</div>
+
+<script>
+// =============================================================
+// State
+// =============================================================
+let currentAgent   = '';
+let currentSession = '';   // session_id string
+let sending        = false;
+let currentSendRef = '';   // name of the KubeCopilotSend in flight
+
+// Running sessions: sendRef → { sendRef, prompt, sessionId, date, el }
+const runningItems = {};
+
+// In-memory chat history: { [sessionId]: [{role, content}] }
+const history = {};
+
+// =============================================================
+// Init
+// =============================================================
+async function init() {
+  await loadAgents();
+}
+
+async function loadAgents() {
+  try {
+    const agents = await apiFetch('/agents');
+    const sel = document.getElementById('agentSelect');
+    if (!agents.length) {
+      sel.innerHTML = '<option value="">No agents found</option>';
+      return;
+    }
+    sel.innerHTML = agents.map(a =>
+      `<option value="${esc(a)}">${esc(a)}</option>`
+    ).join('');
+    currentAgent = agents[0];
+    sel.value    = currentAgent;
+    sel.addEventListener('change', async () => {
+      currentAgent = sel.value;
+      newSession();
+      await loadSessions();
+    });
+    await loadSessions();
+  } catch (e) {
+    console.error('Failed to load agents', e);
+  }
+}
+
+async function loadSessions() {
+  if (!currentAgent) return;
+  try {
+    const [sessions, running] = await Promise.all([
+      apiFetch(`/sessions?agent_ref=${enc(currentAgent)}`).catch(() => []),
+      apiFetch(`/running-sessions?agent_ref=${enc(currentAgent)}`).catch(() => []),
+    ]);
+    renderSessionList(sessions);
+    // Populate running items from server (e.g. on page reload)
+    for (const r of running) {
+      if (!runningItems[r.send_ref]) {
+        addRunningItem(r.send_ref, r.message, r.session_id, r.created_at);
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load sessions', e);
+  }
+}
+
+// =============================================================
+// Running Sessions
+// =============================================================
+function _runningItemHtml(item) {
+  const sid = item.sessionId;
+  const onclickAttr = sid
+    ? `onclick="selectSession('${esc(sid)}', '${esc(item.prompt || '')}')" style="cursor:pointer"`
+    : `onclick="focusRunningSession('${esc(item.sendRef)}')" style="cursor:pointer"`;
+  return `
+    <div class="session-item-body" ${onclickAttr}>
+      <div class="session-preview">${esc(item.prompt || 'New Session')}</div>
+      <div class="session-meta">${sid ? esc(sid.substring(0, 18)) + '… · ' : '⏳ Starting…  '}${item.date ? formatDate(item.date) : ''}</div>
+    </div>`;
+}
+
+function focusRunningSession(sendRef) {
+  // Navigate back to the in-progress session view (session_id not yet known)
+  const item = runningItems[sendRef];
+  const sid = item ? (item.sessionId || '') : '';
+
+  currentSession = sid;
+  updateBadge();
+
+  // Restore chat view (user message is in history[''] for new sessions)
+  renderChat();
+  if (sending) showTyping();
+
+  // Re-wire activity stream back to this send
+  clearActivityLog();
+  startActivityStream(sid || null, sendRef);
+
+  // Highlight running item, de-highlight previous sessions
+  document.querySelectorAll('#runningSessionsList .session-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sendRef === sendRef);
+  });
+  document.querySelectorAll('#sessionList .session-item').forEach(el => {
+    el.classList.remove('active');
+  });
+}
+
+function addRunningItem(sendRef, prompt, sessionId, date) {
+  if (runningItems[sendRef]) return; // already exists
+  const list = document.getElementById('runningSessionsList');
+  const el = document.createElement('div');
+  el.className = 'session-item running';
+  el.dataset.sendRef = sendRef;
+  const item = { sendRef, prompt, sessionId, date, el };
+  el.innerHTML = _runningItemHtml(item);
+  list.appendChild(el);
+  runningItems[sendRef] = item;
+  updateRunningHeader();
+}
+
+function updateRunningItem(sendRef, sessionId, prompt, date) {
+  const item = runningItems[sendRef];
+  if (!item) return;
+  item.sessionId = sessionId || item.sessionId;
+  item.prompt = prompt || item.prompt;
+  item.date = date || item.date;
+  item.el.innerHTML = _runningItemHtml(item);
+}
+
+function removeRunningItem(sendRef) {
+  const item = runningItems[sendRef];
+  if (!item) return;
+  item.el.remove();
+  delete runningItems[sendRef];
+  updateRunningHeader();
+}
+
+function updateRunningHeader() {
+  const header = document.getElementById('runningHeader');
+  const list = document.getElementById('runningSessionsList');
+  const hasItems = list.children.length > 0;
+  header.style.display = hasItems ? '' : 'none';
+}
+
+// =============================================================
+// Session management
+// =============================================================
+function renderSessionList(sessions) {
+  const el = document.getElementById('sessionList');
+  // Filter out sessions that are currently in Running Sessions
+  const runningSids = new Set(Object.values(runningItems).map(r => r.sessionId).filter(Boolean));
+  const filtered = (sessions || []).filter(s => !runningSids.has(s.session_id));
+  if (!filtered.length) {
+    el.innerHTML = '<p class="no-sessions">No previous sessions</p>';
+    return;
+  }
+  el.innerHTML = filtered.map(s => `
+    <div class="session-item ${s.session_id === currentSession ? 'active' : ''}"
+         onclick="selectSession('${esc(s.session_id)}', '${esc(s.first_message)}')">
+      <div class="session-item-body">
+        <div class="session-preview">${esc(s.first_message || 'Session')}</div>
+        <div class="session-meta">${esc(s.session_id.substring(0, 18))}… · ${formatDate(s.created_at)}</div>
+      </div>
+      <button class="session-delete-btn" title="Delete session"
+              onclick="event.stopPropagation(); deleteSession('${esc(s.session_id)}')">🗑</button>
+    </div>
+  `).join('');
+}
+
+async function deleteSession(sid) {
+  if (!confirm(`Delete this session and all its messages?\n\n${sid}`)) return;
+
+  try {
+    const res = await fetch(
+      `/sessions?agent_ref=${enc(currentAgent)}&session_id=${enc(sid)}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    // If we were viewing the deleted session, reset to new session view
+    if (currentSession === sid) {
+      newSession();
+    }
+
+    // Remove from in-memory history
+    delete history[sid];
+
+    await refreshSessionList();
+  } catch (e) {
+    alert(`Failed to delete session: ${e.message}`);
+  }
+}
+
+async function selectSession(sid, preview) {
+  currentSession = sid;
+  updateBadge();
+  refreshSessionList();
+
+  // De-highlight all running session items when switching to a previous session
+  document.querySelectorAll('#runningSessionsList .session-item').forEach(el => {
+    el.classList.remove('active');
+  });
+
+  // If this session is currently running, use sendRef-based activity stream
+  // and highlight the running item instead
+  const runningItem = Object.values(runningItems).find(r => r.sessionId === sid);
+
+  clearActivityLog();
+  if (runningItem) {
+    startActivityStream(sid, runningItem.sendRef);
+    runningItem.el.classList.add('active');
+  } else {
+    startActivityStream(sid);
+  }
+
+  // Load from server if we don't have it in memory
+  if (!history[sid]) {
+    setStatus('Loading session history…');
+    try {
+      const msgs = await apiFetch(`/history?agent_ref=${enc(currentAgent)}&session_id=${enc(sid)}`);
+      history[sid] = msgs;
+    } catch (e) {
+      console.error('Failed to load history', e);
+      history[sid] = [];
+    }
+    setStatus('');
+  }
+  renderChat();
+  // Restore typing indicator if session is still in-flight
+  if (runningItem && sending) showTyping();
+}
+
+function newSession() {
+  currentSession = '';
+  updateBadge();
+  clearChat();
+  clearActivityLog();
+  stopActivityStream();
+  refreshSessionList();
+}
+
+async function refreshSessionList() {
+  const sessions = await apiFetch(`/sessions?agent_ref=${enc(currentAgent)}`).catch(() => []);
+  renderSessionList(sessions);
+}
+
+function updateBadge() {
+  const badge = document.getElementById('sessionBadge');
+  badge.textContent = currentSession
+    ? `Session: ${currentSession.substring(0, 22)}…`
+    : 'New session';
+}
+
+// =============================================================
+// Chat rendering
+// =============================================================
+function renderChat() {
+  const msgs = history[currentSession] || [];
+  const el   = document.getElementById('messages');
+
+  if (!msgs.length) { clearChat(); return; }
+
+  hideEmpty();
+  el.innerHTML = msgs.map(m => buildBubble(m.role, m.content)).join('');
+  scrollBottom();
+}
+
+function appendBubble(role, content) {
+  hideEmpty();
+  const el = document.getElementById('messages');
+  el.insertAdjacentHTML('beforeend', buildBubble(role, content));
+  scrollBottom();
+  // Store in history
+  if (!history[currentSession]) history[currentSession] = [];
+  history[currentSession].push({ role, content });
+}
+
+function buildBubble(role, content) {
+  const html = mdToHtml(content);
+  return `<div class="msg-row ${esc(role)}"><div class="bubble">${html}</div></div>`;
+}
+
+function showTyping() {
+  hideEmpty();
+  document.getElementById('messages').insertAdjacentHTML('beforeend', `
+    <div class="typing-row" id="typingRow">
+      <div class="typing-bubble">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      </div>
+    </div>`);
+  scrollBottom();
+}
+
+function removeTyping() {
+  document.getElementById('typingRow')?.remove();
+}
+
+function clearChat() {
+  const el = document.getElementById('messages');
+  el.innerHTML = `
+    <div class="empty-state" id="emptyState">
+      <div class="icon">💬</div>
+      <p><strong>Select an agent and start chatting</strong></p>
+      <p>Or pick a previous session from the sidebar.</p>
+    </div>`;
+}
+
+function hideEmpty() {
+  document.getElementById('emptyState')?.remove();
+}
+
+function scrollBottom() {
+  const el = document.getElementById('messages');
+  el.scrollTop = el.scrollHeight;
+}
+
+// =============================================================
+// Send message via SSE
+// =============================================================
+async function sendMessage() {
+  const input = document.getElementById('msgInput');
+  const message = input.value.trim();
+  if (!message || sending) return;
+  if (!currentAgent) { alert('Please select an agent first.'); return; }
+
+  sending = true;
+  setSendEnabled(false);
+  input.value = '';
+  input.style.height = '';
+
+  appendBubble('user', message);
+  showTyping();
+
+  const params = new URLSearchParams({
+    message,
+    agent_ref: currentAgent,
+    session_id: currentSession,
+  });
+
+  const es = new EventSource(`/chat/stream?${params}`);
+
+  es.addEventListener('started', e => {
+    const d = JSON.parse(e.data);
+    currentSendRef = d.send_ref;
+    setActivityDotLive(true);
+    // Add to Running Sessions immediately
+    addRunningItem(d.send_ref, message, currentSession, new Date().toISOString());
+    refreshSessionList(); // remove from Previous Sessions if it was there
+    // Immediately start streaming activity for this specific send
+    clearActivityLog();
+    startActivityStream(currentSession || null, d.send_ref);
+  });
+
+  es.addEventListener('status', e => {
+    const d = JSON.parse(e.data);
+    setStatus(d.message);
+  });
+
+  es.addEventListener('heartbeat', e => {
+    const d = JSON.parse(e.data);
+    setStatus(`Agent is thinking… (${d.elapsed}s elapsed)`);
+  });
+
+  es.addEventListener('done', e => {
+    es.close();
+    removeTyping();
+    const d = JSON.parse(e.data);
+
+    // Remove from Running Sessions
+    removeRunningItem(currentSendRef);
+
+    // If this was a new session, set it now and refresh sidebar
+    const prevSession = currentSession;
+    currentSession = d.session_id;
+    if (!prevSession || prevSession !== d.session_id) {
+      updateBadge();
+      // Patch history key if session changed
+      if (prevSession && history[prevSession] && prevSession !== d.session_id) {
+        history[d.session_id] = history[prevSession];
+        delete history[prevSession];
+      }
+    }
+    refreshSessionList();
+
+    // Switch activity stream from send-ref mode to session mode (keeps history visible)
+    startActivityStream(d.session_id);
+    currentSendRef = '';
+
+    appendBubble('assistant', d.response);
+    setActivityDotLive(false);
+    setStatus('');
+    sending = false;
+    setSendEnabled(true);
+  });
+
+  es.addEventListener('error', e => {
+    es.close();
+    removeTyping();
+    let msg = 'An error occurred.';
+    try { msg = JSON.parse(e.data).message; } catch {}
+    removeRunningItem(currentSendRef);
+    appendBubble('assistant', `⚠️ **Error:** ${msg}`);
+    setActivityDotLive(false);
+    setStatus('');
+    sending = false;
+    currentSendRef = '';
+    setSendEnabled(true);
+    refreshSessionList();
+  });
+
+  es.onerror = () => {
+    if (sending) {
+      es.close();
+      removeTyping();
+      appendBubble('assistant', '⚠️ **Connection lost.** Please try again.');
+      setStatus('');
+      sending = false;
+      currentSendRef = '';
+      setSendEnabled(true);
+    }
+  };
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 144) + 'px';
+}
+
+function setSendEnabled(on) {
+  const btn  = document.getElementById('sendBtn');
+  const stop = document.getElementById('stopBtn');
+  btn.disabled = !on;
+  btn.setAttribute('aria-busy', on ? 'false' : 'true');
+  btn.style.display  = on ? '' : 'none';
+  stop.style.display = on ? 'none' : '';
+}
+
+async function cancelMessage() {
+  if (!currentSendRef || !currentAgent) return;
+  try {
+    await apiFetch(`/cancel?send_ref=${enc(currentSendRef)}&agent_ref=${enc(currentAgent)}`, { method: 'POST' });
+    setStatus('Cancelling…');
+  } catch (e) {
+    setStatus('Cancel failed: ' + e.message);
+  }
+}
+
+function setStatus(msg) {
+  document.getElementById('statusBar').textContent = msg;
+}
+
+// =============================================================
+// Minimal Markdown renderer
+// =============================================================
+function mdToHtml(raw) {
+  // 1. Protect code blocks
+  const blocks = [];
+  let s = raw.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const i = blocks.length;
+    blocks.push(`<pre><code class="lang-${esc(lang)}">${escHtml(code.trim())}</code></pre>`);
+    return `\x00BLOCK${i}\x00`;
+  });
+
+  // 2. Escape HTML in the rest
+  s = escHtml(s);
+
+  // 3. Inline code
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+
+  // 4. Bold / Italic
+  s = s.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // 5. Headers
+  s = s.replace(/^### (.+)$/gm, '<h6>$1</h6>');
+  s = s.replace(/^## (.+)$/gm,  '<h5>$1</h5>');
+  s = s.replace(/^# (.+)$/gm,   '<h4>$1</h4>');
+
+  // 6. Blockquote
+  s = s.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // 7. HR
+  s = s.replace(/^---$/gm, '<hr>');
+
+  // 8. Tables (simple)
+  s = s.replace(/((?:^(?:[^\n]*\|[^\n]*)\n)+)/gm, tableBlock => {
+    const rows = tableBlock.trim().split('\n').filter(r => !/^[\s|:-]+$/.test(r));
+    if (rows.length < 1) return tableBlock;
+    const [head, ...body] = rows;
+    const th = head.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
+    const trs = body.map(r =>
+      '<tr>' + r.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('') + '</tr>'
+    ).join('');
+    return `<table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`;
+  });
+
+  // 9. Lists
+  s = s.replace(/((?:^[ \t]*[-*] .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n')
+      .map(l => `<li>${l.replace(/^[ \t]*[-*] /, '')}</li>`).join('');
+    return `<ul>${items}</ul>`;
+  });
+  s = s.replace(/((?:^\d+\. .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n')
+      .map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('');
+    return `<ol>${items}</ol>`;
+  });
+
+  // 10. Paragraphs (double newline → paragraph break)
+  s = s.split(/\n{2,}/).map(para => {
+    para = para.trim();
+    if (!para) return '';
+    if (/^<(h[1-6]|ul|ol|table|blockquote|hr|pre)/.test(para)) return para;
+    return `<p>${para.replace(/\n/g, '<br>')}</p>`;
+  }).join('');
+
+  // 11. Restore code blocks
+  s = s.replace(/\x00BLOCK(\d+)\x00/g, (_, i) => blocks[+i]);
+
+  return s;
+}
+
+// =============================================================
+// Activity panel (KubeCopilotChunk streaming)
+// =============================================================
+let activityExpanded = false;
+let activityES = null;
+let activitySession = '';
+function toggleActivity() {
+  activityExpanded = !activityExpanded;
+  const panel  = document.getElementById('activityPanel');
+  const toggle = document.getElementById('activityToggle');
+  panel.className = 'activity-panel ' + (activityExpanded ? 'expanded' : 'collapsed');
+  toggle.textContent = activityExpanded ? '▼ collapse' : '▲ expand';
+  if (activityExpanded) scrollActivityBottom();
+}
+
+let activityDotTimer = null;
+
+function startActivityStream(sessionId, sendRef) {
+  if (!currentAgent) return;
+  if (!sessionId && !sendRef) return;
+
+  // Don't restart if we're already streaming this exact combination
+  const key = sendRef || sessionId;
+  if (activitySession === key && activityES) return;
+
+  stopActivityStream();
+  activitySession = key;
+
+  const params = new URLSearchParams({ agent_ref: currentAgent });
+  if (sendRef)   params.set('send_ref', sendRef);
+  if (sessionId) params.set('session_id', sessionId);
+
+  activityES = new EventSource(`/chunks/stream?${params}`);
+  // Dot stays gray until a chunk actually arrives
+
+  activityES.addEventListener('chunk', e => {
+    const chunk = JSON.parse(e.data);
+    appendActivityChunk(chunk);
+    // When session_id first appears in a chunk, update the Running Sessions entry
+    if (chunk.session_id && sendRef && runningItems[sendRef]) {
+      const item = runningItems[sendRef];
+      if (!item.sessionId) {
+        // Migrate in-memory history from old key (e.g. '' or previous session)
+        // to the real session_id so navigating back still shows the user's message
+        const oldKey = item.sessionId ?? '';
+        if (oldKey !== chunk.session_id && history[oldKey]) {
+          history[chunk.session_id] = history[oldKey];
+          delete history[oldKey];
+        }
+        updateRunningItem(sendRef, chunk.session_id, item.prompt, item.date);
+        refreshSessionList(); // ensure Previous Sessions doesn't show it
+      }
+    }
+  });
+
+  activityES.onerror = () => {
+    // dot state managed by send done/error events
+  };
+}
+
+function stopActivityStream() {
+  if (activityES) {
+    activityES.close();
+    activityES = null;
+  }
+  activitySession = '';
+}
+
+function clearActivityLog() {
+  const log = document.getElementById('activityLog');
+  log.innerHTML = '<div class="activity-empty">No activity yet for this session.</div>';
+}
+
+function appendActivityChunk(chunk) {
+  const log = document.getElementById('activityLog');
+  // Remove empty placeholder
+  log.querySelector('.activity-empty')?.remove();
+
+  const icons = {
+    thinking:    '🤔',
+    tool_call:   '🔧',
+    tool_result: '📋',
+    response:    '💬',
+    error:       '❌',
+    info:        '⏳',
+  };
+  const icon = icons[chunk.chunk_type] || '•';
+  const row = document.createElement('div');
+  row.className = `chunk-row ${esc(chunk.chunk_type)}`;
+  // Render markdown-light content inside activity panel
+  row.innerHTML = `<span class="chunk-icon">${icon}</span><span class="chunk-content">${escHtml(chunk.content)}</span>`;
+  log.appendChild(row);
+  if (activityExpanded) scrollActivityBottom();
+}
+
+function scrollActivityBottom() {
+  const log = document.getElementById('activityLog');
+  log.scrollTop = log.scrollHeight;
+}
+
+function setActivityDotLive(live) {
+  const dot = document.getElementById('activityDot');
+  dot.className = 'activity-dot' + (live ? ' live' : '');
+}
+
+// =============================================================
+// Utilities
+// =============================================================
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function enc(s) { return encodeURIComponent(s); }
+
+function formatDate(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch { return ''; }
+}
+
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, options);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// =============================================================
+init();
+</script>
+</body>
+</html>

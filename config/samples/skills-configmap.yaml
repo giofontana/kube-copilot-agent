@@ -1,0 +1,382 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: copilot-skills
+  namespace: kube-copilot-agent
+# Each key becomes a skill. The key name (without .md) is used as the skill
+# directory name. The entrypoint restructures these into the native Agent Skills
+# format: /copilot/skills/<skill-name>/SKILL.md
+#
+# SKILL.md content must include YAML frontmatter with:
+#   name: (lowercase, hyphens for spaces — should match the key name)
+#   description: (tells copilot WHEN to use this skill)
+data:
+  monitor.md: |
+    ---
+    name: monitor
+    description: >
+      Monitor the health and performance of Kubernetes and OpenShift clusters.
+      Covers node status, pod health, resource utilization, events, and alerts.
+    ---
+
+    # Cluster Monitoring
+
+    Use this skill to assess the overall health of the cluster and its workloads.
+
+    ## 1. Cluster-Wide Health Check
+
+    Run this sequence to get a full picture:
+
+    ```bash
+    # Active context and cluster info
+    kubectl config current-context
+    kubectl cluster-info
+
+    # Node status and resource pressure
+    kubectl get nodes -o wide
+    kubectl describe nodes | grep -A5 "Conditions:"
+    kubectl top nodes
+
+    # Unhealthy pods across all namespaces
+    kubectl get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded \
+      | grep -v Completed
+
+    # Recent warning events (last 30 min)
+    kubectl get events -A --field-selector=type=Warning \
+      --sort-by='.lastTimestamp' | tail -40
+    ```
+
+    ## 2. Namespace / Project Health
+
+    ```bash
+    # All resources in a namespace
+    kubectl get all -n <namespace>
+
+    # Pod resource consumption
+    kubectl top pods -n <namespace> --sort-by=memory
+
+    # CrashLoopBackOff / OOMKilled pods
+    kubectl get pods -n <namespace> | grep -E "CrashLoop|OOMKilled|Error|Pending"
+
+    # Pod logs (last 100 lines, with timestamps)
+    kubectl logs -n <namespace> <pod> --tail=100 --timestamps
+
+    # Previous container logs (after crash)
+    kubectl logs -n <namespace> <pod> --previous --tail=100
+    ```
+
+    ## 3. OpenShift-Specific Monitoring
+
+    ```bash
+    # Cluster operators health
+    oc get clusteroperators
+
+    # Node conditions via MachineConfigPool
+    oc get mcp
+
+    # Monitoring stack (Prometheus/Alertmanager)
+    oc get pods -n openshift-monitoring
+
+    # Active alerts
+    oc exec -n openshift-monitoring alertmanager-main-0 -- \
+      amtool alert query --alertmanager.url=http://localhost:9093 2>/dev/null || \
+      echo "Use the OCP console Monitoring > Alerting tab"
+
+    # Router (ingress) status
+    oc get pods -n openshift-ingress
+    oc get ingresscontroller -n openshift-ingress-operator
+    ```
+
+    ## 4. Persistent Storage
+
+    ```bash
+    # PV/PVC status
+    kubectl get pv,pvc -A | grep -v Bound
+
+    # StorageClass availability
+    kubectl get sc
+    ```
+
+    ## 5. Certificate Expiry (OCP)
+
+    ```bash
+    oc get secret -A -o json | \
+      python3 -c "
+    import sys, json, base64, datetime, ssl, tempfile, os
+    data = json.load(sys.stdin)
+    for item in data['items']:
+        for k, v in item.get('data', {}).items():
+            if k.endswith('.crt') or k.endswith('tls.crt'):
+                print(item['metadata']['namespace'], item['metadata']['name'], k)
+    " 2>/dev/null || echo "Use: oc get secret -A | grep tls"
+    ```
+
+  deploy.md: |
+    ---
+    name: deploy
+    description: >
+      Deploy, update, and validate applications on Kubernetes and OpenShift.
+      Covers rollouts, image updates, scaling, health checks, and smoke tests.
+    ---
+
+    # Application Deployment & Testing
+
+    Use this skill to deploy applications, manage rollouts, and verify they are working.
+
+    ## 1. Pre-Deployment Checklist
+
+    Before deploying, always verify:
+
+    ```bash
+    # Confirm target context and namespace
+    kubectl config current-context
+    kubectl config get-contexts
+
+    # Namespace/project exists and has quota headroom
+    kubectl describe namespace <namespace> | grep -A10 "Resource Quotas"
+    kubectl top nodes   # ensure node capacity
+    ```
+
+    ## 2. Deploying a Manifest
+
+    ```bash
+    # Dry-run first (server-side)
+    kubectl apply -f <manifest.yaml> --dry-run=server
+
+    # Apply
+    kubectl apply -f <manifest.yaml>
+
+    # Watch rollout
+    kubectl rollout status deployment/<name> -n <namespace> --timeout=5m
+    ```
+
+    ## 3. Updating an Image
+
+    ```bash
+    # Kubernetes
+    kubectl set image deployment/<name> <container>=<image>:<tag> -n <namespace>
+    kubectl rollout status deployment/<name> -n <namespace>
+
+    # OpenShift (trigger ImageStream-based rollout)
+    oc tag <source-image>:<tag> <imagestream>:<tag> -n <namespace>
+    oc rollout latest dc/<name> -n <namespace>   # if using DeploymentConfig
+    ```
+
+    ## 4. Scaling
+
+    ```bash
+    # Scale deployment
+    kubectl scale deployment/<name> --replicas=<n> -n <namespace>
+
+    # HPA status
+    kubectl get hpa -n <namespace>
+    kubectl describe hpa/<name> -n <namespace>
+    ```
+
+    ## 5. Smoke Testing After Deployment
+
+    ```bash
+    # Check pods are Running and Ready
+    kubectl get pods -n <namespace> -l app=<label> -w
+
+    # Port-forward for local testing
+    kubectl port-forward svc/<service> 8080:80 -n <namespace>
+
+    # In-cluster curl test (run a temporary pod)
+    kubectl run smoke-test --rm -it --restart=Never \
+      --image=curlimages/curl:latest -- \
+      curl -sf http://<service>.<namespace>.svc.cluster.local:<port>/health
+
+    # OpenShift Route test
+    ROUTE=$(oc get route <name> -n <namespace> -o jsonpath='{.spec.host}')
+    curl -sf https://$ROUTE/health
+    ```
+
+    ## 6. Rollback
+
+    ```bash
+    # View rollout history
+    kubectl rollout history deployment/<name> -n <namespace>
+
+    # Rollback to previous revision
+    kubectl rollout undo deployment/<name> -n <namespace>
+
+    # Rollback to specific revision
+    kubectl rollout undo deployment/<name> --to-revision=<n> -n <namespace>
+
+    # OpenShift DeploymentConfig rollback
+    oc rollback dc/<name> -n <namespace>
+    ```
+
+    ## 7. OpenShift Builds
+
+    ```bash
+    # Start a new build
+    oc start-build <buildconfig> -n <namespace> --follow
+
+    # Check build logs
+    oc logs build/<name>-<n> -n <namespace>
+
+    # List recent builds
+    oc get builds -n <namespace> --sort-by='.metadata.creationTimestamp' | tail -5
+    ```
+
+  troubleshoot.md: |
+    ---
+    name: troubleshoot
+    description: >
+      Diagnose and resolve issues in Kubernetes and OpenShift clusters.
+      Covers CrashLoopBackOff, OOMKilled, Pending pods, networking, storage,
+      RBAC errors, and node problems.
+    ---
+
+    # Troubleshooting Guide
+
+    Use this skill to diagnose and fix issues in the cluster.
+
+    ## 1. Pod Not Starting (Pending / CrashLoopBackOff / Error)
+
+    ```bash
+    # Step 1: describe the pod — look at Events section
+    kubectl describe pod <pod> -n <namespace>
+
+    # Step 2: logs
+    kubectl logs <pod> -n <namespace> --tail=100
+    kubectl logs <pod> -n <namespace> --previous --tail=100   # after crash
+
+    # Step 3: check resource requests vs node capacity
+    kubectl describe pod <pod> -n <namespace> | grep -A5 "Requests\|Limits"
+    kubectl top nodes
+    ```
+
+    ### Common causes:
+
+    | Symptom | Likely Cause | Fix |
+    |---------|-------------|-----|
+    | `Pending` – insufficient CPU/memory | Resource quota / no node capacity | Scale cluster or reduce requests |
+    | `Pending` – no PVC | PV not available or StorageClass wrong | Check `kubectl get pvc,pv -A` |
+    | `ImagePullBackOff` | Wrong image tag or missing pull secret | Check image name; add `imagePullSecret` |
+    | `CrashLoopBackOff` | App crashes on start | Check logs with `--previous` |
+    | `OOMKilled` | Container exceeds memory limit | Increase memory limit or fix memory leak |
+    | `CreateContainerConfigError` | Missing ConfigMap or Secret | Check references in pod spec |
+
+    ## 2. Networking Issues
+
+    ```bash
+    # Service endpoints — if empty, label selector mismatch
+    kubectl get endpoints <service> -n <namespace>
+    kubectl describe svc <service> -n <namespace>
+
+    # DNS resolution test from inside cluster
+    kubectl run dns-test --rm -it --restart=Never \
+      --image=busybox:1.36 -- nslookup <service>.<namespace>.svc.cluster.local
+
+    # Network connectivity test
+    kubectl run net-test --rm -it --restart=Never \
+      --image=nicolaka/netshoot -- bash
+
+    # OpenShift Route not working
+    oc describe route <name> -n <namespace>
+    oc get pods -n openshift-ingress    # check router pods
+    ```
+
+    ## 3. Node Issues
+
+    ```bash
+    # Node conditions
+    kubectl describe node <node> | grep -A10 "Conditions:"
+
+    # Drain node safely (cordon + evict)
+    kubectl cordon <node>
+    kubectl drain <node> --ignore-daemonsets --delete-emissary-data --timeout=5m
+
+    # Uncordon after maintenance
+    kubectl uncordon <node>
+
+    # OpenShift: check MachineConfig and node status
+    oc get nodes
+    oc get mcp
+    oc describe node <node> | grep -A10 "Conditions:"
+    ```
+
+    ## 4. RBAC / Permission Errors
+
+    ```bash
+    # Check what a service account can do
+    kubectl auth can-i --list \
+      --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
+
+    # Simulate a specific action
+    kubectl auth can-i get pods \
+      --as=system:serviceaccount:<namespace>:<sa-name> -n <namespace>
+
+    # List ClusterRoleBindings for a subject
+    kubectl get clusterrolebindings -o json | \
+      python3 -c "
+    import sys,json
+    d=json.load(sys.stdin)
+    sa='<sa-name>'
+    for b in d['items']:
+        for s in b.get('subjects',[]):
+            if s.get('name')==sa:
+                print(b['metadata']['name'], b['roleRef']['name'])
+    "
+    ```
+
+    ## 5. Storage Issues
+
+    ```bash
+    # Stuck PVC
+    kubectl get pvc -n <namespace>
+    kubectl describe pvc <pvc-name> -n <namespace>
+
+    # PV reclaim — check if Released/Failed
+    kubectl get pv | grep -v Bound
+
+    # Force-delete a stuck PVC (removes finalizers)
+    kubectl patch pvc <pvc-name> -n <namespace> \
+      -p '{"metadata":{"finalizers":[]}}' --type=merge
+    ```
+
+    ## 6. etcd / Control Plane (OCP)
+
+    ```bash
+    # etcd health
+    oc get pods -n openshift-etcd
+
+    # etcd member list (run inside etcd pod)
+    oc exec -n openshift-etcd etcd-<master-node> -- \
+      etcdctl member list \
+      --endpoints=https://localhost:2379 \
+      --cacert=/etc/kubernetes/static-pod-resources/etcd-member/ca.crt \
+      --cert=/etc/kubernetes/static-pod-resources/etcd-member/system:etcd-peer:*.crt \
+      --key=/etc/kubernetes/static-pod-resources/etcd-member/system:etcd-peer:*.key \
+      -w table
+
+    # API server latency
+    oc get --raw /metrics | grep apiserver_request_duration
+    ```
+
+    ## 7. Gathering a Full Incident Report
+
+    When escalating an issue, collect:
+
+    ```bash
+    # Cluster version
+    kubectl version --short
+    oc version   # OCP
+
+    # Node summary
+    kubectl get nodes -o wide
+
+    # Failing pods
+    kubectl get pods -A | grep -Ev "Running|Completed"
+
+    # Recent warning events
+    kubectl get events -A --field-selector=type=Warning \
+      --sort-by='.lastTimestamp' | tail -50
+
+    # Resource usage
+    kubectl top nodes
+    kubectl top pods -A --sort-by=memory | head -20
+    ```

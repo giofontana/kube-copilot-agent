@@ -1,0 +1,14 @@
+apiVersion: kubecopilot.io/v1
+kind: KubeCopilotAgent
+metadata:
+  name: github-copilot-agent
+  namespace: kube-copilot-agent
+spec:
+  githubTokenSecretRef:
+    name: github-token
+  skillsConfigMap: copilot-skills
+  agentConfigMap: copilot-agent-md
+  storageSize: "1Gi"
+  image: quay.io/gfontana/kube-github-copilot-agent-server:v1.0
+  kubeconfigSecretRef:
+    name: cluster-kubeconfig

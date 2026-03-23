@@ -1,0 +1,9 @@
+apiVersion: kubecopilot.io/v1
+kind: KubeCopilotSend
+metadata:
+  name: example-send
+  namespace: kube-copilot-agent
+spec:
+  agentRef: gh-copilot-agent
+  message: "What is the overall health of the cluster? Summarize in a few bullet points."
+  sessionID: ""  # leave empty to start a new session

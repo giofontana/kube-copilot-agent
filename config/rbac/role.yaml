@@ -1,0 +1,76 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - pods
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubecopilot.io
+  resources:
+  - kubecopilotagents
+  - kubecopilotcancels
+  - kubecopilotchunks
+  - kubecopilotmessages
+  - kubecopilotsends
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubecopilot.io
+  resources:
+  - kubecopilotagents/finalizers
+  - kubecopilotmessages/finalizers
+  - kubecopilotsends/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - kubecopilot.io
+  resources:
+  - kubecopilotagents/status
+  - kubecopilotcancels/status
+  - kubecopilotchunks/status
+  - kubecopilotmessages/status
+  - kubecopilotsends/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - kubecopilot.io
+  resources:
+  - kubecopilotresponses
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch

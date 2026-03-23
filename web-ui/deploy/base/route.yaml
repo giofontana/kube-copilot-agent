@@ -1,0 +1,17 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: kube-copilot-ui
+  namespace: kube-copilot-agent
+  annotations:
+    # Long timeout to keep SSE stream alive while the agent processes commands
+    haproxy.router.openshift.io/timeout: 360s
+spec:
+  to:
+    kind: Service
+    name: kube-copilot-ui
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

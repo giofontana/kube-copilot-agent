@@ -1,0 +1,9 @@
+apiVersion: kubecopilot.io/v1
+kind: KubeCopilotMessage
+metadata:
+  name: my-first-command
+  namespace: kube-copilot-agent
+spec:
+  agentRef: github-copilot-agent
+  message: "Explain how to list all pods in a namespace using kubectl"
+  sessionID: ""
