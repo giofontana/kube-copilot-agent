@@ -2,10 +2,17 @@
 
 echo "Starting Kube Copilot Agent installation..."
 
-# Build and push images
-echo "[1/10] Building and pushing operator, agent, and UI container images..."
-make container-build container-push container-build-agent container-push-agent container-build-ui container-push-ui
-echo "Container images built and pushed."
+# Ask whether to build/push images
+echo "Do you want to build and push operator/agent/UI container images? [Y/n]"
+read -r build_images_choice
+
+if [[ -z "$build_images_choice" || "$build_images_choice" =~ ^[Yy]$ ]]; then
+  echo "[1/10] Building and pushing operator, agent, and UI container images..."
+  make container-build container-push container-build-agent container-push-agent container-build-ui container-push-ui
+  echo "Container images built and pushed."
+else
+  echo "[1/10] Skipping container image build and push."
+fi
 
 # Create namespace
 echo "[2/10] Creating namespace..."
