@@ -62,19 +62,19 @@ func (r *KubeCopilotMessageReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Idempotent: skip if already terminal
-	if cmd.Status.Phase == "Done" || cmd.Status.Phase == "Error" {
+	if cmd.Status.Phase == phaseDone || cmd.Status.Phase == phaseError {
 		return ctrl.Result{}, nil
 	}
 
 	agent := &agentv1.KubeCopilotAgent{}
 	if err := r.Get(ctx, types.NamespacedName{Name: cmd.Spec.AgentRef, Namespace: cmd.Namespace}, agent); err != nil {
 		log.Error(err, "failed to get agent", "agentRef", cmd.Spec.AgentRef)
-		cmd.Status.Phase = "Error"
+		cmd.Status.Phase = phaseError
 		cmd.Status.ErrorMessage = fmt.Sprintf("agent not found: %v", err)
 		return ctrl.Result{}, r.Status().Update(ctx, cmd)
 	}
 
-	if agent.Status.Phase != "Running" {
+	if agent.Status.Phase != phaseRunning {
 		log.Info("agent not running, requeueing", "agentPhase", agent.Status.Phase)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
@@ -94,26 +94,26 @@ func (r *KubeCopilotMessageReconciler) Reconcile(ctx context.Context, req ctrl.R
 	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(bodyBytes))
 	if err != nil {
 		log.Error(err, "failed to call agent")
-		cmd.Status.Phase = "Error"
+		cmd.Status.Phase = phaseError
 		cmd.Status.ErrorMessage = err.Error()
 		return ctrl.Result{}, r.Status().Update(ctx, cmd)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		cmd.Status.Phase = "Error"
+		cmd.Status.Phase = phaseError
 		cmd.Status.ErrorMessage = fmt.Sprintf("agent returned status %d", resp.StatusCode)
 		return ctrl.Result{}, r.Status().Update(ctx, cmd)
 	}
 
 	var chatResp chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		cmd.Status.Phase = "Error"
+		cmd.Status.Phase = phaseError
 		cmd.Status.ErrorMessage = fmt.Sprintf("failed to decode response: %v", err)
 		return ctrl.Result{}, r.Status().Update(ctx, cmd)
 	}
 
-	cmd.Status.Phase = "Done"
+	cmd.Status.Phase = phaseDone
 	cmd.Status.Response = chatResp.Response
 	cmd.Status.SessionID = chatResp.SessionID
 	return ctrl.Result{}, r.Status().Update(ctx, cmd)
