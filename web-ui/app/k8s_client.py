@@ -74,32 +74,59 @@ def list_responses(namespace: str) -> list[dict]:
 
 
 def list_sessions(agent_ref: str, namespace: str) -> list[dict]:
-    """Return unique sessions derived from past KubeCopilotResponse objects."""
+    """Return unique sessions derived from KubeCopilotResponse and KubeCopilotSend objects."""
     label_selector = f"kubecopilot.io/agent-ref={agent_ref}"
-    result = _api.list_namespaced_custom_object(
+
+    # Collect sessions from responses (have the real session_id assigned by the agent)
+    resp_result = _api.list_namespaced_custom_object(
         GROUP, VERSION, namespace, PLURAL_RESPONSES,
         label_selector=label_selector,
     )
-    items = result.get("items", [])
+    # Collect sessions from sends (to surface sessions where the response is missing,
+    # e.g. still in progress or the webhook hasn't fired yet)
+    send_result = _api.list_namespaced_custom_object(
+        GROUP, VERSION, namespace, PLURAL_SENDS,
+    )
 
     seen: dict[str, dict] = {}
-    sorted_items = sorted(
-        items,
+
+    # Process responses oldest-first so seen[sid] ends up being the FIRST exchange
+    resp_items = sorted(
+        resp_result.get("items", []),
         key=lambda r: r["metadata"].get("creationTimestamp", ""),
-        reverse=True,
+        reverse=False,
     )
-    for resp in sorted_items:
+    for resp in resp_items:
         spec = resp.get("spec", {})
         labels = resp["metadata"].get("labels", {})
         sid = spec.get("sessionID") or labels.get("kubecopilot.io/session-id")
-        if not sid or sid in seen:
+        if not sid or sid == "unknown":
             continue
-        seen[sid] = {
-            "session_id": sid,
-            "first_message": spec.get("prompt", "")[:80],
-            "created_at": resp["metadata"].get("creationTimestamp", ""),
-        }
-    return list(seen.values())
+        # Keep the FIRST response per session (oldest) so first_message is accurate
+        if sid not in seen:
+            seen[sid] = {
+                "session_id": sid,
+                "first_message": spec.get("prompt", "")[:80],
+                "created_at": resp["metadata"].get("creationTimestamp", ""),
+            }
+
+    # Also include sessions visible only in sends (e.g. still running, no response yet)
+    for send in send_result.get("items", []):
+        spec = send.get("spec", {})
+        if spec.get("agentRef") != agent_ref:
+            continue
+        sid = spec.get("sessionID")
+        if not sid or sid == "unknown":
+            continue
+        if sid not in seen:
+            seen[sid] = {
+                "session_id": sid,
+                "first_message": spec.get("message", "")[:80],
+                "created_at": send["metadata"].get("creationTimestamp", ""),
+            }
+
+    # Sort newest session first for display
+    return sorted(seen.values(), key=lambda s: s["created_at"], reverse=True)
 
 
 def delete_session(session_id: str, agent_ref: str, namespace: str) -> int:
@@ -337,7 +364,7 @@ def get_provider_secret(agent_ref: str, namespace: str) -> dict | None:
 
 
 def upsert_provider_secret(agent_ref: str, namespace: str, provider_type: str,
-                           base_url: str, api_key: str) -> str:
+                           base_url: str, api_key: str, model_name: str = "") -> str:
     """Create or update the provider Secret for an agent. Returns the Secret name."""
     secret_name = f"{agent_ref}-provider"
     labels = {
@@ -349,6 +376,8 @@ def upsert_provider_secret(agent_ref: str, namespace: str, provider_type: str,
         "base-url": base_url,
         "api-key": api_key,
     }
+    if model_name:
+        string_data["model-name"] = model_name
     try:
         existing = _core_api.read_namespaced_secret(secret_name, namespace)
         existing.string_data = string_data

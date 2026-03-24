@@ -47,9 +47,10 @@ type KubeCopilotSendReconciler struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 type providerConfig struct {
-	Type    string `json:"type,omitempty"`
-	BaseURL string `json:"base_url,omitempty"`
-	APIKey  string `json:"api_key,omitempty"`
+	Type      string `json:"type,omitempty"`
+	BaseURL   string `json:"base_url,omitempty"`
+	APIKey    string `json:"api_key,omitempty"`
+	ModelName string `json:"model_name,omitempty"`
 }
 
 type customAgentConfig struct {
@@ -153,8 +154,21 @@ func (r *KubeCopilotSendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 					send.Status.ErrorMessage = fmt.Sprintf("provider secret not found: %v", err)
 					return ctrl.Result{}, r.Status().Update(ctx, send)
 				}
+				// Secret values override CRD fields (secret is the authoritative source for BYOK)
+				if t, ok := secret.Data["type"]; ok {
+					pc.Type = string(t)
+				}
+				if baseURL, ok := secret.Data["base-url"]; ok {
+					pc.BaseURL = string(baseURL)
+				}
 				if apiKey, ok := secret.Data["api-key"]; ok {
 					pc.APIKey = string(apiKey)
+				}
+				if modelName, ok := secret.Data["model-name"]; ok {
+					pc.ModelName = string(modelName)
+					if payload.Model == "" {
+						payload.Model = string(modelName)
+					}
 				}
 			}
 			payload.Provider = pc

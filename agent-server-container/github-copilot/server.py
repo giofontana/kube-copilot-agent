@@ -10,6 +10,7 @@ management, concurrent request handling, and programmatic configuration.
 import asyncio
 import json
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -28,6 +29,9 @@ SESSIONS_DIR = COPILOT_HOME / "sessions"
 SKILLS_DIR = COPILOT_HOME / "skills"
 CUSTOM_AGENTS_FILE = COPILOT_HOME / "custom-agents.json"
 INSTRUCTIONS_FILE = COPILOT_HOME / "copilot-instructions.md"
+# Staging paths — ConfigMaps are read-only; server copies them to the writable PVC at startup
+SKILLS_STAGING_DIR = Path("/copilot-skills-staging")
+AGENT_STAGING_DIR = Path("/copilot-agent-staging")
 
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 SKILLS_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,9 +67,10 @@ async def _get_client() -> CopilotClient:
 
 class ProviderConfig(BaseModel):
     type: str = "openai"
-    base_url: str
+    base_url: str | None = None
     api_key: str | None = None
     bearer_token: str | None = None
+    model_name: str | None = None
 
 
 class CustomAgentConfig(BaseModel):
@@ -170,6 +175,9 @@ async def _build_session_opts(cfg: SessionConfig | None) -> dict:
 
     if cfg.provider:
         opts["provider"] = cfg.provider.model_dump(exclude_none=True)
+        # Provider's model_name takes precedence as the top-level SDK model option
+        if cfg.provider.model_name and not opts.get("model"):
+            opts["model"] = cfg.provider.model_name
 
     return opts
 
@@ -220,6 +228,7 @@ async def _run_sdk_streaming(
     sequence = 0
     response_text = ""
     resolved_session_id = session_id or ""
+    _thinking_buffer = ""  # accumulates reasoning deltas until a sentence boundary
 
     if chunk_url and send_ref:
         await _post_chunk(
@@ -232,11 +241,12 @@ async def _run_sdk_streaming(
 
     # Create or resume session
     if session_id:
-        session = await client.resume_session(session_id, opts)
+        session = await client.resume_session(session_id, **opts)
     else:
-        session = await client.create_session(opts)
+        session = await client.create_session(**opts)
 
-    # Register for cancellation
+    # Capture session ID immediately from the session object
+    resolved_session_id = getattr(session, "session_id", None) or session_id or ""
     if queue_id:
         _active_sessions[queue_id] = session
 
@@ -245,7 +255,7 @@ async def _run_sdk_streaming(
     cancelled = False
 
     def on_event(event):
-        nonlocal sequence, response_text, resolved_session_id, cancelled
+        nonlocal sequence, response_text, resolved_session_id, cancelled, _thinking_buffer
 
         etype = event.type.value if hasattr(event.type, "value") else str(event.type)
         data = event.data if hasattr(event, "data") else None
@@ -260,16 +270,26 @@ async def _run_sdk_streaming(
             if delta:
                 response_text += delta
 
-        # Reasoning deltas
+        # Reasoning deltas — buffer until a sentence boundary, then post one chunk
         elif etype == "assistant.reasoning_delta":
             delta = getattr(data, "delta_content", "") or ""
-            if delta and chunk_url and send_ref:
-                asyncio.get_event_loop().create_task(_post_chunk(
-                    chunk_url, send_ref, resolved_session_id or session_id,
-                    agent_ref, namespace, sequence, "thinking",
-                    f"🤔 {delta[:300]}",
-                ))
-                sequence += 1
+            if delta:
+                _thinking_buffer += delta
+                # Flush on sentence-ending punctuation followed by whitespace or end
+                if chunk_url and send_ref and any(
+                    c in _thinking_buffer for c in (".", "!", "?", "\n")
+                ):
+                    # Split on sentence boundary; keep trailing fragment in buffer
+                    parts = re.split(r'(?<=[.!?\n])\s*', _thinking_buffer, maxsplit=1)
+                    flush_text = parts[0].strip()
+                    _thinking_buffer = parts[1].strip() if len(parts) > 1 else ""
+                    if flush_text:
+                        asyncio.get_event_loop().create_task(_post_chunk(
+                            chunk_url, send_ref, resolved_session_id or session_id,
+                            agent_ref, namespace, sequence, "thinking",
+                            f"🤔 {flush_text[:300]}",
+                        ))
+                        sequence += 1
 
         # Final message
         elif etype == "assistant.message":
@@ -392,7 +412,7 @@ async def _run_sdk_streaming(
                 chunk_url, send_ref, resolved_session_id or session_id,
                 agent_ref, namespace, sequence, "error", cancelled_msg,
             )
-        return cancelled_msg, resolved_session_id or "unknown"
+        return cancelled_msg, resolved_session_id or session_id or ""
 
     # Disconnect session (cleanup) — don't delete CLI state
     await session.disconnect()
@@ -400,7 +420,15 @@ async def _run_sdk_streaming(
     if not response_text:
         response_text = "No response captured"
 
-    return response_text, resolved_session_id or "unknown"
+    # Flush any remaining thinking text that didn't end with punctuation
+    if _thinking_buffer.strip() and chunk_url and send_ref:
+        await _post_chunk(
+            chunk_url, send_ref, resolved_session_id or session_id,
+            agent_ref, namespace, sequence, "thinking",
+            f"🤔 {_thinking_buffer.strip()[:300]}",
+        )
+
+    return response_text, resolved_session_id or session_id or ""
 
 
 # ── Async queue processing ───────────────────────────────────────────────────
@@ -460,6 +488,23 @@ async def _handle_async_item(item: dict):
 
 @app.on_event("startup")
 async def startup_event():
+    # Copy skills from read-only ConfigMap staging into writable PVC
+    if SKILLS_STAGING_DIR.exists():
+        for item in SKILLS_STAGING_DIR.iterdir():
+            dest = SKILLS_DIR / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True)
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, dest)
+
+    # Copy AGENT.md from read-only ConfigMap staging into writable PVC.
+    # Only copy if the destination is missing or empty (preserve user edits).
+    agent_src = AGENT_STAGING_DIR / "AGENT.md"
+    if agent_src.exists():
+        if not INSTRUCTIONS_FILE.exists() or INSTRUCTIONS_FILE.stat().st_size == 0:
+            shutil.copy2(agent_src, INSTRUCTIONS_FILE)
+
     asyncio.create_task(_process_queue())
 
 
@@ -535,12 +580,12 @@ async def chat(req: ChatRequest):
     opts = await _build_session_opts(req.session_config)
 
     if req.session_id:
-        session = await client.resume_session(req.session_id, opts)
+        session = await client.resume_session(req.session_id, **opts)
     else:
-        session = await client.create_session(opts)
+        session = await client.create_session(**opts)
 
     response_text = ""
-    resolved_session_id = req.session_id or ""
+    resolved_session_id = getattr(session, "session_id", None) or req.session_id or ""
     done = asyncio.Event()
 
     def on_event(event):
@@ -569,7 +614,7 @@ async def chat(req: ChatRequest):
 
     await session.disconnect()
 
-    session_id = resolved_session_id or "unknown"
+    session_id = resolved_session_id or req.session_id or ""
 
     # Migrate history if session IDs don't match
     if req.session_id and resolved_session_id and req.session_id != resolved_session_id:

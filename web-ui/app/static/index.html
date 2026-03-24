@@ -342,6 +342,15 @@
       font-size: 0.75rem; color: #4caf50;
       text-align: center; min-height: 1.2rem; margin-top: 0.25rem;
     }
+    .model-source-toggle {
+      display: flex; gap: 1.5rem; margin-bottom: 1rem;
+      padding-bottom: 0.75rem; border-bottom: 1px solid var(--pico-muted-border-color);
+    }
+    .model-source-option {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.85rem; cursor: pointer; color: var(--pico-color);
+    }
+    .model-source-option input[type="radio"] { margin: 0; cursor: pointer; }
     .skill-item, .agent-item {
       border: 1px solid var(--pico-muted-border-color);
       border-radius: 0.4rem; padding: 0.6rem;
@@ -357,6 +366,15 @@
       color: var(--pico-muted-color); font-size: 0.85rem; padding: 0.1rem 0.3rem;
     }
     .item-delete-btn:hover { color: #f07178; }
+
+    /* ── Embedded mode (OpenShift Console plugin) ── */
+    body.embedded .app-header { display: none; }
+    body.embedded .sidebar { width: 240px; min-width: 240px; }
+    body.embedded .layout { height: 100vh; }
+    body.embedded .settings-dialog { width: min(700px, 95vw); max-height: 90vh; }
+    body.embedded .bubble { max-width: min(80%, 720px); }
+    body.embedded .input-area { padding: 0.5rem 1rem; }
+    body.embedded .messages { padding: 0.75rem 1rem; }
   </style>
 </head>
 <body>
@@ -382,15 +400,51 @@
       <button class="settings-tab" onclick="switchSettingsTab(this,'tab-instructions')">Instructions</button>
       <button class="settings-tab" onclick="switchSettingsTab(this,'tab-skills')">Skills</button>
       <button class="settings-tab" onclick="switchSettingsTab(this,'tab-agents')">Agents</button>
-      <button class="settings-tab" onclick="switchSettingsTab(this,'tab-byok')">BYOK</button>
     </div>
     <div class="settings-body">
-      <!-- Model tab -->
+      <!-- Model / BYOK consolidated tab -->
       <div class="settings-section active" id="tab-model">
-        <label for="modelSelect">Model</label>
-        <select id="modelSelect"><option value="">Default</option></select>
-        <p style="font-size:0.72rem;color:var(--pico-muted-color)">Select a model for new messages. Leave as "Default" to use the agent's configured model.</p>
+        <!-- Radio toggle -->
+        <div class="model-source-toggle">
+          <label class="model-source-option">
+            <input type="radio" name="modelSource" value="model" checked onchange="switchModelSource('model')">
+            <span>Copilot Model</span>
+          </label>
+          <label class="model-source-option">
+            <input type="radio" name="modelSource" value="byok" onchange="switchModelSource('byok')">
+            <span>BYOK Provider</span>
+          </label>
+        </div>
+
+        <!-- Copilot model panel -->
+        <div id="panel-model">
+          <label for="modelSelect">Model</label>
+          <select id="modelSelect"><option value="">Default</option></select>
+          <p style="font-size:0.72rem;color:var(--pico-muted-color)">Select a model for new messages. Leave as "Default" to use the agent's configured model.</p>
+        </div>
+
+        <!-- BYOK panel -->
+        <div id="panel-byok" style="display:none">
+          <label for="byokType">Provider Type</label>
+          <select id="byokType">
+            <option value="openai">OpenAI-compatible</option>
+            <option value="azure">Azure OpenAI</option>
+          </select>
+          <label for="byokBaseUrl">Base URL</label>
+          <input type="url" id="byokBaseUrl" placeholder="https://api.example.com/v1" />
+          <label for="byokModelName">Model Name</label>
+          <input type="text" id="byokModelName" placeholder="e.g. gpt-4o, llama-3, mistral-large" />
+          <label for="byokApiKey">API Key</label>
+          <input type="password" id="byokApiKey" placeholder="sk-..." />
+          <div id="byokStatus" style="font-size:0.75rem;color:var(--pico-muted-color);margin-bottom:0.5rem"></div>
+          <div class="settings-actions">
+            <button onclick="saveProvider()">Save Provider</button>
+            <button class="secondary outline" onclick="deleteProvider()">Remove</button>
+          </div>
+        </div>
+
         <div class="settings-toast" id="modelToast"></div>
+        <div class="settings-toast" id="byokToast"></div>
       </div>
       <!-- Instructions tab -->
       <div class="settings-section" id="tab-instructions">
@@ -419,24 +473,6 @@
           <button class="secondary" onclick="loadCustomAgents()">Reload</button>
         </div>
         <div class="settings-toast" id="agentsToast"></div>
-      </div>
-      <!-- BYOK tab -->
-      <div class="settings-section" id="tab-byok">
-        <label for="byokType">Provider Type</label>
-        <select id="byokType">
-          <option value="openai">OpenAI-compatible</option>
-          <option value="azure">Azure OpenAI</option>
-        </select>
-        <label for="byokBaseUrl">Base URL</label>
-        <input type="url" id="byokBaseUrl" placeholder="https://api.example.com/v1" />
-        <label for="byokApiKey">API Key</label>
-        <input type="password" id="byokApiKey" placeholder="sk-..." />
-        <div id="byokStatus" style="font-size:0.75rem;color:var(--pico-muted-color);margin-bottom:0.5rem"></div>
-        <div class="settings-actions">
-          <button onclick="saveProvider()">Save Provider</button>
-          <button class="secondary outline" onclick="deleteProvider()">Remove</button>
-        </div>
-        <div class="settings-toast" id="byokToast"></div>
       </div>
     </div>
   </div>
@@ -497,6 +533,22 @@
 </div>
 
 <script>
+// =============================================================
+// Embedded mode detection (OpenShift Console plugin)
+// =============================================================
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('embedded') === 'true') {
+    document.body.classList.add('embedded');
+  }
+  // Listen for theme changes from the parent frame (e.g. OpenShift Console)
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'theme-change') {
+      document.documentElement.setAttribute('data-theme', e.data.theme);
+    }
+  });
+})();
+
 // =============================================================
 // State
 // =============================================================
@@ -833,10 +885,14 @@ async function sendMessage() {
     agent_ref: currentAgent,
     session_id: currentSession,
   });
-  // Include session config overrides
-  const model = document.getElementById('modelSelect')?.value;
-  if (model) params.set('model', model);
+  // Include session config overrides.
+  // When BYOK is active the model is already embedded in the provider secret — do not send
+  // a separate model param or it will override the provider's model name.
   const providerRef = localStorage.getItem(`byok_secret_${currentAgent}`);
+  if (!providerRef) {
+    const model = document.getElementById('modelSelect')?.value;
+    if (model) params.set('model', model);
+  }
   if (providerRef) params.set('provider_secret_ref', providerRef);
 
   const es = new EventSource(`/chat/stream?${params}`);
@@ -1167,6 +1223,11 @@ async function apiFetch(url, options = {}) {
 // =============================================================
 // Settings panel
 // =============================================================
+function switchModelSource(source) {
+  document.getElementById('panel-model').style.display = source === 'model' ? '' : 'none';
+  document.getElementById('panel-byok').style.display  = source === 'byok'  ? '' : 'none';
+}
+
 function openSettings() {
   if (!currentAgent) { alert('Please select an agent first.'); return; }
   document.getElementById('settingsOverlay').classList.add('open');
@@ -1200,16 +1261,27 @@ async function loadModels() {
   try {
     const data = await apiFetch(`/models?agent_ref=${enc(currentAgent)}`);
     const sel = document.getElementById('modelSelect');
-    const current = sel.value;
     sel.innerHTML = '<option value="">Default</option>';
+    const validIds = new Set();
     (data.models || []).forEach(m => {
-      const name = typeof m === 'string' ? m : (m.name || m.id || JSON.stringify(m));
-      sel.innerHTML += `<option value="${esc(name)}">${esc(name)}</option>`;
+      const id    = typeof m === 'string' ? m : (m.id   || m.name || JSON.stringify(m));
+      const label = typeof m === 'string' ? m : (m.name || m.id   || JSON.stringify(m));
+      sel.innerHTML += `<option value="${esc(id)}">${esc(label)}</option>`;
+      validIds.add(id);
     });
-    // Restore previous selection from localStorage
+    // Restore previous selection — only if the saved value is a valid model id.
+    // Old entries stored display names; silently discard them so the user picks fresh.
     const saved = localStorage.getItem(`model_${currentAgent}`);
-    if (saved) sel.value = saved;
-    sel.onchange = () => localStorage.setItem(`model_${currentAgent}`, sel.value);
+    if (saved && validIds.has(saved)) sel.value = saved;
+    else if (saved) localStorage.removeItem(`model_${currentAgent}`);
+
+    sel.onchange = () => {
+      localStorage.setItem(`model_${currentAgent}`, sel.value);
+      // Any model change (including back to Default) requires a new session.
+      const label = sel.value ? `"${sel.options[sel.selectedIndex].text}"` : 'Default';
+      newSession();
+      showToast('modelToast', `Model set to ${label}. Started a new session.`);
+    };
   } catch (e) {
     showToast('modelToast', 'Failed to load models: ' + e.message, true);
   }
@@ -1379,6 +1451,20 @@ async function saveCustomAgents() {
 }
 
 // ── BYOK Provider ──
+function _applyByokModelState(configured, modelName) {
+  // Switch radio + panel to reflect the active source
+  const radios = document.querySelectorAll('input[name="modelSource"]');
+  radios.forEach(r => { r.checked = (r.value === (configured ? 'byok' : 'model')); });
+  switchModelSource(configured ? 'byok' : 'model');
+
+  const sel = document.getElementById('modelSelect');
+  if (!sel) return;
+  if (!configured) {
+    // Restore user's previously saved model preference
+    const saved = localStorage.getItem(`model_${currentAgent}`);
+    if (saved) sel.value = saved;
+  }
+}
 async function loadProviderStatus() {
   try {
     const data = await apiFetch(`/api/agents/${enc(currentAgent)}/provider`);
@@ -1388,11 +1474,14 @@ async function loadProviderStatus() {
       status.style.color = '#4caf50';
       document.getElementById('byokType').value = data.type || 'openai';
       document.getElementById('byokBaseUrl').value = data.base_url || '';
+      document.getElementById('byokModelName').value = data.model_name || '';
       localStorage.setItem(`byok_secret_${currentAgent}`, data.secret_name);
+      _applyByokModelState(true, data.model_name);
     } else {
       status.textContent = 'No provider configured — using default Copilot models.';
       status.style.color = 'var(--pico-muted-color)';
       localStorage.removeItem(`byok_secret_${currentAgent}`);
+      _applyByokModelState(false, '');
     }
   } catch (e) {
     document.getElementById('byokStatus').textContent = 'Could not load provider status.';
@@ -1402,6 +1491,7 @@ async function loadProviderStatus() {
 async function saveProvider() {
   const type = document.getElementById('byokType').value;
   const base_url = document.getElementById('byokBaseUrl').value.trim();
+  const model_name = document.getElementById('byokModelName').value.trim();
   const api_key = document.getElementById('byokApiKey').value.trim();
   if (!base_url) { showToast('byokToast', 'Base URL is required', true); return; }
   if (!api_key) { showToast('byokToast', 'API Key is required', true); return; }
@@ -1409,7 +1499,7 @@ async function saveProvider() {
     const data = await (await fetch(`/api/agents/${enc(currentAgent)}/provider`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, base_url, api_key }),
+      body: JSON.stringify({ type, base_url, model_name, api_key }),
     })).json();
     localStorage.setItem(`byok_secret_${currentAgent}`, data.secret_name);
     document.getElementById('byokApiKey').value = '';

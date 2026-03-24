@@ -2,7 +2,8 @@
 
 echo "Uninstalling Kube Copilot Agent..."
 
-kubectl delete -k config/samples/
-make undeploy
-make uninstall
+helm uninstall kube-copilot-console-plugin --namespace kube-copilot-agent  # if installed
+helm uninstall kube-copilot-ui      --namespace kube-copilot-agent
+helm uninstall my-agent             --namespace kube-copilot-agent
+helm uninstall kube-copilot-agent   --namespace kube-copilot-agent
 kubectl delete namespace kube-copilot-agent
