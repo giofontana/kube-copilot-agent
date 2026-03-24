@@ -207,10 +207,10 @@ func (r *KubeCopilotAgentReconciler) ensurePod(ctx context.Context, agent *agent
 				},
 			},
 		})
+		// Mount to a staging path; server.py copies it to the writable PVC at startup
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "agent-config",
-			MountPath: "/copilot/copilot-instructions.md",
-			SubPath:   "AGENT.md",
+			MountPath: "/copilot-agent-staging",
 		})
 	}
 

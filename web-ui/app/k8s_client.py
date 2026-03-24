@@ -1,5 +1,6 @@
 import uuid
 
+import httpx
 from kubernetes import client, config as k8s_config
 from kubernetes.client.rest import ApiException
 
@@ -21,11 +22,20 @@ def _load_config():
 
 _load_config()
 _api = client.CustomObjectsApi()
+_core_api = client.CoreV1Api()
 
 
-def create_send(message: str, agent_ref: str, session_id: str | None, namespace: str) -> str:
+def create_send(message: str, agent_ref: str, session_id: str | None, namespace: str,
+                session_config: dict | None = None) -> str:
     """Create a KubeCopilotSend (async, fire-and-forget). Returns the object name."""
     name = f"send-{uuid.uuid4().hex[:12]}"
+    spec = {
+        "agentRef": agent_ref,
+        "message": message,
+        "sessionID": session_id or "",
+    }
+    if session_config:
+        spec["sessionConfig"] = session_config
     body = {
         "apiVersion": f"{GROUP}/{VERSION}",
         "kind": "KubeCopilotSend",
@@ -36,11 +46,7 @@ def create_send(message: str, agent_ref: str, session_id: str | None, namespace:
                 "kubecopilot.io/agent-ref": agent_ref,
             },
         },
-        "spec": {
-            "agentRef": agent_ref,
-            "message": message,
-            "sessionID": session_id or "",
-        },
+        "spec": spec,
     }
     _api.create_namespaced_custom_object(GROUP, VERSION, namespace, PLURAL_SENDS, body)
     return name
@@ -68,32 +74,59 @@ def list_responses(namespace: str) -> list[dict]:
 
 
 def list_sessions(agent_ref: str, namespace: str) -> list[dict]:
-    """Return unique sessions derived from past KubeCopilotResponse objects."""
+    """Return unique sessions derived from KubeCopilotResponse and KubeCopilotSend objects."""
     label_selector = f"kubecopilot.io/agent-ref={agent_ref}"
-    result = _api.list_namespaced_custom_object(
+
+    # Collect sessions from responses (have the real session_id assigned by the agent)
+    resp_result = _api.list_namespaced_custom_object(
         GROUP, VERSION, namespace, PLURAL_RESPONSES,
         label_selector=label_selector,
     )
-    items = result.get("items", [])
+    # Collect sessions from sends (to surface sessions where the response is missing,
+    # e.g. still in progress or the webhook hasn't fired yet)
+    send_result = _api.list_namespaced_custom_object(
+        GROUP, VERSION, namespace, PLURAL_SENDS,
+    )
 
     seen: dict[str, dict] = {}
-    sorted_items = sorted(
-        items,
+
+    # Process responses oldest-first so seen[sid] ends up being the FIRST exchange
+    resp_items = sorted(
+        resp_result.get("items", []),
         key=lambda r: r["metadata"].get("creationTimestamp", ""),
-        reverse=True,
+        reverse=False,
     )
-    for resp in sorted_items:
+    for resp in resp_items:
         spec = resp.get("spec", {})
         labels = resp["metadata"].get("labels", {})
         sid = spec.get("sessionID") or labels.get("kubecopilot.io/session-id")
-        if not sid or sid in seen:
+        if not sid or sid == "unknown":
             continue
-        seen[sid] = {
-            "session_id": sid,
-            "first_message": spec.get("prompt", "")[:80],
-            "created_at": resp["metadata"].get("creationTimestamp", ""),
-        }
-    return list(seen.values())
+        # Keep the FIRST response per session (oldest) so first_message is accurate
+        if sid not in seen:
+            seen[sid] = {
+                "session_id": sid,
+                "first_message": spec.get("prompt", "")[:80],
+                "created_at": resp["metadata"].get("creationTimestamp", ""),
+            }
+
+    # Also include sessions visible only in sends (e.g. still running, no response yet)
+    for send in send_result.get("items", []):
+        spec = send.get("spec", {})
+        if spec.get("agentRef") != agent_ref:
+            continue
+        sid = spec.get("sessionID")
+        if not sid or sid == "unknown":
+            continue
+        if sid not in seen:
+            seen[sid] = {
+                "session_id": sid,
+                "first_message": spec.get("message", "")[:80],
+                "created_at": send["metadata"].get("creationTimestamp", ""),
+            }
+
+    # Sort newest session first for display
+    return sorted(seen.values(), key=lambda s: s["created_at"], reverse=True)
 
 
 def delete_session(session_id: str, agent_ref: str, namespace: str) -> int:
@@ -266,3 +299,110 @@ def list_running_sessions(agent_ref: str, namespace: str) -> list[dict]:
             })
     running.sort(key=lambda s: s["created_at"])
     return running
+
+
+# ── Agent service discovery ──────────────────────────────────────────────────
+
+def get_agent_service_url(agent_ref: str, namespace: str) -> str:
+    """Return the in-cluster base URL for the agent HTTP server."""
+    agent = _api.get_namespaced_custom_object(GROUP, VERSION, namespace, PLURAL_AGENTS, agent_ref)
+    service_name = agent.get("status", {}).get("serviceName", "")
+    if not service_name:
+        raise ValueError(f"Agent {agent_ref} has no serviceName in status")
+    return f"http://{service_name}.{namespace}.svc.cluster.local:8080"
+
+
+async def proxy_agent_get(agent_ref: str, namespace: str, path: str) -> dict:
+    """GET a path from the agent HTTP server."""
+    base = get_agent_service_url(agent_ref, namespace)
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        resp = await http.get(f"{base}{path}")
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def proxy_agent_put(agent_ref: str, namespace: str, path: str, body: dict) -> dict:
+    """PUT a path on the agent HTTP server."""
+    base = get_agent_service_url(agent_ref, namespace)
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        resp = await http.put(f"{base}{path}", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def proxy_agent_delete(agent_ref: str, namespace: str, path: str) -> dict:
+    """DELETE a path on the agent HTTP server."""
+    base = get_agent_service_url(agent_ref, namespace)
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        resp = await http.delete(f"{base}{path}")
+        resp.raise_for_status()
+        return resp.json()
+
+
+# ── Provider Secret management ───────────────────────────────────────────────
+
+PROVIDER_SECRET_LABEL = "kubecopilot.io/type"
+PROVIDER_SECRET_LABEL_VALUE = "provider"
+
+
+def get_provider_secret(agent_ref: str, namespace: str) -> dict | None:
+    """Get the provider secret for an agent (label kubecopilot.io/type=provider)."""
+    label = f"{PROVIDER_SECRET_LABEL}={PROVIDER_SECRET_LABEL_VALUE},kubecopilot.io/agent-ref={agent_ref}"
+    result = _core_api.list_namespaced_secret(namespace, label_selector=label)
+    if result.items:
+        secret = result.items[0]
+        data = {}
+        if secret.data:
+            import base64
+            for k, v in secret.data.items():
+                data[k] = base64.b64decode(v).decode("utf-8")
+        return {
+            "name": secret.metadata.name,
+            "data": data,
+        }
+    return None
+
+
+def upsert_provider_secret(agent_ref: str, namespace: str, provider_type: str,
+                           base_url: str, api_key: str, model_name: str = "") -> str:
+    """Create or update the provider Secret for an agent. Returns the Secret name."""
+    secret_name = f"{agent_ref}-provider"
+    labels = {
+        PROVIDER_SECRET_LABEL: PROVIDER_SECRET_LABEL_VALUE,
+        "kubecopilot.io/agent-ref": agent_ref,
+    }
+    string_data = {
+        "type": provider_type,
+        "base-url": base_url,
+        "api-key": api_key,
+    }
+    if model_name:
+        string_data["model-name"] = model_name
+    try:
+        existing = _core_api.read_namespaced_secret(secret_name, namespace)
+        existing.string_data = string_data
+        existing.metadata.labels = labels
+        _core_api.replace_namespaced_secret(secret_name, namespace, existing)
+    except ApiException as e:
+        if e.status == 404:
+            secret = client.V1Secret(
+                metadata=client.V1ObjectMeta(name=secret_name, namespace=namespace, labels=labels),
+                string_data=string_data,
+                type="Opaque",
+            )
+            _core_api.create_namespaced_secret(namespace, secret)
+        else:
+            raise
+    return secret_name
+
+
+def delete_provider_secret(agent_ref: str, namespace: str) -> bool:
+    """Delete the provider Secret for an agent. Returns True if deleted."""
+    secret_name = f"{agent_ref}-provider"
+    try:
+        _core_api.delete_namespaced_secret(secret_name, namespace)
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            return False
+        raise
