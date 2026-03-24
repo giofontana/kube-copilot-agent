@@ -106,6 +106,7 @@ async def chat_stream(
         if system_message:
             sc_fields["systemMessage"] = system_message
         if provider_secret_ref:
+            sc_fields["byok"] = True
             sc_fields["provider"] = {"secretRef": provider_secret_ref}
         if sc_fields:
             session_config = sc_fields
@@ -264,6 +265,7 @@ async def get_provider(agent_ref: str):
             "secret_name": secret["name"],
             "type": secret["data"].get("type", ""),
             "base_url": secret["data"].get("base-url", ""),
+            "model_name": secret["data"].get("model-name", ""),
             # Never return the API key to the frontend
             "has_api_key": bool(secret["data"].get("api-key", "")),
         }
@@ -275,13 +277,14 @@ async def put_provider(agent_ref: str, request: Request):
     body = await request.json()
     provider_type = body.get("type", "openai")
     base_url = body.get("base_url", "")
+    model_name = body.get("model_name", "")
     api_key = body.get("api_key", "")
     if not base_url:
         raise HTTPException(status_code=400, detail="base_url is required")
     if not api_key:
         raise HTTPException(status_code=400, detail="api_key is required")
     secret_name = k8s_client.upsert_provider_secret(
-        agent_ref, settings.namespace, provider_type, base_url, api_key,
+        agent_ref, settings.namespace, provider_type, base_url, api_key, model_name=model_name,
     )
     return {"status": "saved", "secret_name": secret_name}
 

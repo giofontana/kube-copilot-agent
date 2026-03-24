@@ -60,6 +60,10 @@ spec:
                 description: SessionConfig holds optional per-session configuration
                   overrides.
                 properties:
+                  byok:
+                    description: BYOK indicates this session uses a Bring Your Own
+                      Key provider.
+                    type: boolean
                   customAgents:
                     description: CustomAgents defines sub-agents available in this
                       session.

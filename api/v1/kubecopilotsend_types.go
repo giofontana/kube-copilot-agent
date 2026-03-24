@@ -84,6 +84,10 @@ type SessionConfig struct {
 	// +optional
 	Provider *ProviderConfig `json:"provider,omitempty"`
 
+	// BYOK indicates this session uses a Bring Your Own Key provider.
+	// +optional
+	BYOK bool `json:"byok,omitempty"`
+
 	// ToolsConfig enables or disables specific tools by name.
 	// +optional
 	ToolsConfig map[string]bool `json:"toolsConfig,omitempty"`
