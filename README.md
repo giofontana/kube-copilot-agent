@@ -1,13 +1,39 @@
 # kube-copilot-agent
 
-> ⚠️ **Disclaimer:** This project is experimental and has not been tested in a production or live environment. It may contain bugs, security vulnerabilities, or incomplete features. Running AI agents with cluster access carries inherent risks — agents may execute unintended commands or access sensitive resources. **Use at your own risk.** Review all manifests, RBAC rules, and agent instructions carefully before deploying in any environment you care about.
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-1.20+-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io)
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white)](https://go.dev)
 
-A Kubernetes operator that deploys a Copilot CLI as an AI agent inside your cluster, controlled entirely through Kubernetes CRDs. Users interact with the agent by creating Kubernetes resources — no direct pod access required.
+**A Kubernetes operator that deploys AI agents inside your cluster, controlled entirely through CRDs.**
 
-## Overview
+kube-copilot-agent provides a pluggable framework for running AI agents as Kubernetes-native workloads. The operator is engine-agnostic — it ships with a [GitHub Copilot SDK](#github-copilot-sdk-default-engine) implementation out of the box and can be extended with other AI backends (e.g., [Claude Code](#creating-a-new-agent-image-eg-claude-code)) by swapping the agent server container image. Users interact with agents by creating Kubernetes resources — no direct pod access required.
 
-`kube-copilot-agent` wraps a Copilot CLI, such as [GitHub Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line), in a container and exposes it as a Kubernetes-native AI agent. It supports:
+> [!WARNING]
+> **Disclaimer:** This project is experimental and has not been tested in a production or live environment. It may contain bugs, security vulnerabilities, or incomplete features. Running AI agents with cluster access carries inherent risks — agents may execute unintended commands or access sensitive resources. **Use at your own risk.** Review all manifests, RBAC rules, and agent instructions carefully before deploying in any environment you care about.
 
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Agent Server Container](#agent-server-container)
+- [Development](#development)
+- [Project Structure](#project-structure)
+- [Contributing](#contributing)
+- [Uninstall](#uninstall)
+- [License](#license)
+
+---
+
+## Features
+
+- **Pluggable agent engines** — swap the AI backend by changing the container image in your `KubeCopilotAgent` CR
 - **Multi-turn conversations** with session continuity
 - **Real-time streaming** of agent activity via `KubeCopilotChunk` CRDs
 - **Custom skills** loaded from a ConfigMap or managed at runtime via the UI
@@ -15,12 +41,61 @@ A Kubernetes operator that deploys a Copilot CLI as an AI agent inside your clus
 - **Custom agents** — define inline agent personas with specific prompts and tool sets
 - **Dynamic model selection** — switch models at runtime without redeploying
 - **BYOK (Bring Your Own Key)** — use an external OpenAI-compatible or Azure OpenAI provider, with API keys stored securely in Kubernetes Secrets
-- **Cancellation** of in-flight requests via SDK session disconnect
-- **A web UI** with a settings panel for chatting with agents, browsing session history, and configuring agent behaviour at runtime
+- **Cancellation** of in-flight requests
+- **Web UI** with a settings panel for chatting with agents, browsing session history, and configuring agent behaviour at runtime
+- **OpenShift Console Plugin** — embed the UI directly inside the OpenShift Web Console
 
-`kube-copilot-agent` is designed to be extensible. Check for more information at [Agent Server Container](#agent-server-container).
+See [Agent Server Container](#agent-server-container) for the full pluggable architecture and how to add new engines.
 
-### Architecture
+---
+
+## Screenshots
+
+<details>
+<summary><strong>Main Chat Interface</strong></summary>
+
+![Main UI](docs/screenshots/main-ui.png)
+
+</details>
+
+<details>
+<summary><strong>Settings — Model Selection</strong></summary>
+
+![Model Selection](docs/screenshots/settings-model.png)
+
+</details>
+
+<details>
+<summary><strong>Settings — Instructions Editor</strong></summary>
+
+![Instructions Editor](docs/screenshots/settings-instructions.png)
+
+</details>
+
+<details>
+<summary><strong>Settings — Skills Management</strong></summary>
+
+![Skills Management](docs/screenshots/settings-skills.png)
+
+</details>
+
+<details>
+<summary><strong>Settings — Custom Agents</strong></summary>
+
+![Custom Agents](docs/screenshots/settings-agents.png)
+
+</details>
+
+<details>
+<summary><strong>Settings — BYOK Provider Configuration</strong></summary>
+
+![BYOK Configuration](docs/screenshots/settings-byok.png)
+
+</details>
+
+---
+
+## Architecture
 
 ```mermaid
 flowchart TB
@@ -40,8 +115,8 @@ flowchart TB
     end
 
     subgraph agent["🤖 Agent Pod"]
-        sdk["CopilotClient<br/><sub>GitHub Copilot Python SDK</sub>"]
-        cli["Copilot CLI<br/><sub>server mode · JSON-RPC</sub>"]
+        srv["Agent Server<br/><sub>pluggable engine</sub>"]
+        engine["AI Backend<br/><sub>e.g. Copilot SDK · Claude Code</sub>"]
         pvc[("PVC<br/><sub>sessions · skills<br/>instructions · agents</sub>")]
     end
 
@@ -52,29 +127,29 @@ flowchart TB
         cancel["KubeCopilotCancel"]
     end
 
-    secrets[("🔐 K8s Secrets<br/><sub>GitHub token · BYOK API keys</sub>")]
+    secrets[("🔐 K8s Secrets<br/><sub>API tokens · BYOK API keys</sub>")]
 
     chat -- "/chat/stream" --> main
     settings -- "/api/agents/{ref}/..." --> main
     main --> k8s
     k8s -- "creates CR" --> send
-    k8s -- "proxy HTTP" --> sdk
+    k8s -- "proxy HTTP" --> srv
     k8s -- "CRUD" --> secrets
 
     ctrl -- "reconciles" --> send
     ctrl -- "reads" --> secrets
-    ctrl -- "POST /asyncchat<br/><sub>+ session_config</sub>" --> sdk
+    ctrl -- "POST /asyncchat<br/><sub>+ session_config</sub>" --> srv
 
-    sdk -- "JSON-RPC" --> cli
-    sdk -- "reads/writes" --> pvc
+    srv -- "delegates" --> engine
+    srv -- "reads/writes" --> pvc
 
-    sdk -- "POST /chunk" --> webhook
-    sdk -- "POST /response" --> webhook
+    srv -- "POST /chunk" --> webhook
+    srv -- "POST /response" --> webhook
 
     webhook -- "creates" --> chunk
     webhook -- "creates" --> resp
 
-    cancel -. "DELETE /cancel" .-> sdk
+    cancel -. "DELETE /cancel" .-> srv
 
     style ui fill:#1a1a2e,stroke:#00bcd4,color:#e0e0e0
     style backend fill:#16213e,stroke:#00bcd4,color:#e0e0e0
@@ -83,7 +158,7 @@ flowchart TB
     style crds fill:#16213e,stroke:#ffc107,color:#e0e0e0
 ```
 
-#### Request Flow
+### Request Flow
 
 ```mermaid
 sequenceDiagram
@@ -92,8 +167,8 @@ sequenceDiagram
     participant BE as Backend
     participant K8s as Kubernetes API
     participant Ctrl as Controller
-    participant Agent as Agent Server (SDK)
-    participant CLI as Copilot CLI
+    participant Agent as Agent Server
+    participant Engine as AI Backend
 
     User->>UI: Send message
     UI->>BE: POST /chat/stream
@@ -102,15 +177,15 @@ sequenceDiagram
     Ctrl->>K8s: Read Secret (if BYOK)
     Ctrl->>Agent: POST /asyncchat + session_config
 
-    Agent->>CLI: session.send(message)
+    Agent->>Engine: send message
 
     loop Streaming events
-        CLI-->>Agent: assistant.message_delta
+        Engine-->>Agent: event (delta, tool call, etc.)
         Agent-->>Ctrl: POST /chunk (webhook)
         Ctrl-->>K8s: Create KubeCopilotChunk
     end
 
-    CLI-->>Agent: session.idle
+    Engine-->>Agent: done
     Agent-->>Ctrl: POST /response (webhook)
     Ctrl-->>K8s: Create KubeCopilotResponse
     K8s-->>BE: Watch response
@@ -123,11 +198,49 @@ sequenceDiagram
 | CRD | Purpose |
 |---|---|
 | `KubeCopilotAgent` | Declares an agent instance (image, credentials, skills, instructions) |
-| `KubeCopilotSend` | Send a message to an agent; triggers copilot CLI execution |
+| `KubeCopilotSend` | Send a message to an agent; dispatched to the agent server |
 | `KubeCopilotResponse` | Final response from the agent (written by operator webhook) |
 | `KubeCopilotChunk` | Real-time streaming events (thinking, tool calls, results) |
 | `KubeCopilotCancel` | Cancel an in-flight request |
 | `KubeCopilotMessage` | Legacy single-turn message CRD |
+
+---
+
+## Quick Start
+
+Get up and running in four steps. See [Installation](#installation) for full configuration options.
+
+**1. Install the operator**
+
+```sh
+helm upgrade --install kube-copilot-agent ./helm/kube-copilot-agent \
+  --namespace kube-copilot-agent --create-namespace
+```
+
+**2. Deploy an agent**
+
+```sh
+helm upgrade --install my-agent ./helm/github-copilot-agent \
+  --namespace kube-copilot-agent \
+  --set githubToken.value=<your-github-pat>
+```
+
+**3. Deploy the Web UI**
+
+```sh
+helm upgrade --install kube-copilot-ui ./helm/kube-copilot-ui \
+  --namespace kube-copilot-agent
+```
+
+**4. Access the UI**
+
+```sh
+kubectl port-forward svc/kube-copilot-ui 8080:80 -n kube-copilot-agent
+# Open: http://localhost:8080
+```
+
+> [!TIP]
+> On OpenShift, use `--set route.enabled=true` in step 3 to create a Route instead of port-forwarding.
 
 ---
 
@@ -149,9 +262,7 @@ There are three Helm charts, meant to be installed in order:
 - A GitHub account with Copilot access
 - A GitHub Personal Access Token (PAT) with `copilot` scope
 
----
-
-### Step 1 — Install the operator
+### Step 1 — Install the Operator
 
 ```sh
 helm upgrade --install kube-copilot-agent ./helm/kube-copilot-agent \
@@ -183,9 +294,7 @@ helm upgrade --install kube-copilot-agent ./helm/kube-copilot-agent \
 | `rbac.create` | `true` | Create RBAC resources |
 | `leaderElect` | `true` | Enable leader election |
 
----
-
-### Step 2 — Create credentials
+### Step 2 — Create Credentials
 
 Create a secret with your GitHub PAT:
 
@@ -203,9 +312,7 @@ kubectl create secret generic cluster-kubeconfig \
   -n kube-copilot-agent
 ```
 
----
-
-### Step 3 — Deploy the GitHub Copilot agent
+### Step 3 — Deploy the GitHub Copilot Agent
 
 The `github-copilot-agent` chart creates the `KubeCopilotAgent` CR, a GitHub token Secret, and ConfigMaps for skills and `AGENT.md`. Default skills (monitor, deploy, troubleshoot) and a SysAdmin persona are included out of the box.
 
@@ -290,8 +397,6 @@ Wait for the agent to become ready:
 kubectl get kubecopilotagent my-agent -n kube-copilot-agent -w
 ```
 
----
-
 ### Step 4 — Deploy the Web UI
 
 ```sh
@@ -342,7 +447,7 @@ If you're running on **OpenShift**, you can embed the KubeCopilot UI directly in
 graph LR
     subgraph ocp["OpenShift Console"]
         nav["🧭 Navigation<br/><sub>Home → KubeCopilot AI</sub>"]
-        page["📄 Plugin Page<br/><sub>React component</sub>"]
+        page["�� Plugin Page<br/><sub>React component</sub>"]
     end
 
     subgraph plugin["Console Plugin Pod"]
@@ -383,6 +488,7 @@ helm upgrade --install kube-copilot-console-plugin ./helm/kube-copilot-console-p
 After installation, refresh the OpenShift Console — a new **"KubeCopilot AI"** nav item appears under **Home** in both the Administrator and Developer perspectives.
 
 **How it works:**
+
 1. A `ConsolePlugin` CR registers the plugin with the OpenShift Console operator
 2. A post-install Job patches the Console operator config to enable the plugin
 3. The plugin page loads the existing Web UI inside an iframe with `?embedded=true`
@@ -403,18 +509,7 @@ After installation, refresh the OpenShift Console — a new **"KubeCopilot AI"**
 
 ---
 
-### Uninstall
-
-```sh
-helm uninstall kube-copilot-console-plugin --namespace kube-copilot-agent  # if installed
-helm uninstall kube-copilot-ui      --namespace kube-copilot-agent
-helm uninstall my-agent             --namespace kube-copilot-agent
-helm uninstall kube-copilot-agent   --namespace kube-copilot-agent
-```
-
----
-
-## Interacting with an Agent
+## Usage
 
 ### Via the Web UI
 
@@ -474,7 +569,9 @@ spec:
 
 ---
 
-## Custom Skills
+## Configuration
+
+### Custom Skills
 
 Skills are bash snippets the agent can invoke as tools. Define them in a ConfigMap with a `skills.md` key:
 
@@ -493,11 +590,10 @@ data:
     ```
 ```
 
-See `config/samples/skills-configmap.yaml` for a full example with Kubernetes operations skills.
+> [!NOTE]
+> See `config/samples/skills-configmap.yaml` for a full example with Kubernetes operations skills.
 
----
-
-## Custom Agent Instructions (AGENT.md)
+### Custom Instructions (AGENT.md)
 
 Shape agent behaviour with persistent instructions:
 
@@ -515,11 +611,9 @@ data:
     - Prefer read-only operations unless explicitly asked to make changes.
 ```
 
----
+### Dynamic Configuration (Runtime Settings)
 
-## Dynamic Configuration (Runtime Settings)
-
-The web UI includes a **Settings dialog** (⚙️ button) that lets you configure agent behaviour at runtime — no pod restart or Helm upgrade needed.
+The web UI includes a **Settings dialog** that lets you configure agent behaviour at runtime — no pod restart or Helm upgrade needed.
 
 ```mermaid
 graph LR
@@ -546,25 +640,26 @@ graph LR
     style storage fill:#16213e,stroke:#ffc107,color:#e0e0e0
 ```
 
-### Model Selection
+#### Model Selection
 
 Switch between available Copilot models at runtime. The UI queries `/models` (backed by `client.list_models()` from the SDK) and sends the chosen model with each request via the `session_config.model` field.
 
-### Runtime Instructions
+#### Runtime Instructions
 
 Edit the agent's `copilot-instructions.md` file directly from the UI. Changes are written to the PVC and take effect on the next session — no restart needed.
 
-### Runtime Skills
+#### Runtime Skills
 
 Create, edit, or delete skills through the UI. Each skill is stored as a `SKILL.md` file under `$COPILOT_HOME/skills/<name>/` on the PVC.
 
-### Custom Agents
+#### Custom Agents
 
 Define inline agent personas with specific prompts and tool restrictions. Stored as `custom-agents.json` on the PVC and loaded into each SDK session.
 
-### BYOK (Bring Your Own Key)
+#### BYOK (Bring Your Own Key)
 
 Configure an external OpenAI-compatible or Azure OpenAI provider:
+
 - **Provider type** and **base URL** are stored in the `KubeCopilotSend` CR's `sessionConfig.provider` field
 - **API keys** are stored securely in a Kubernetes Secret and read by the controller at reconciliation time — never persisted in CRDs
 
@@ -586,9 +681,7 @@ spec:
       secretRef: my-provider-secret   # K8s Secret with 'api-key' key
 ```
 
----
-
-## Chunk Types (Real-time Streaming)
+### Chunk Types (Real-time Streaming)
 
 `KubeCopilotChunk` resources are created as the agent works:
 
@@ -605,17 +698,39 @@ spec:
 
 ## Agent Server Container
 
-The `agent-server-container/` directory contains the server that bridges the Kubernetes operator with an AI CLI tool running inside the agent pod. Each subdirectory implements the server for a specific AI agent binary.
+The `agent-server-container/` directory contains the pluggable server that bridges the Kubernetes operator with an AI backend running inside the agent pod. Each subdirectory implements the server for a **specific AI engine**. The operator doesn't care which engine is inside — as long as the container implements the [API contract](#api-contract) below, everything works.
 
 ```
 agent-server-container/
-  github-copilot/       ← GitHub Copilot CLI implementation
+  github-copilot/       ← GitHub Copilot SDK engine (default, shipped)
     server.py           ← FastAPI server (SDK-backed)
     entrypoint.sh       ← Container entrypoint (auth setup, skill staging)
     Containerfile       ← Container image definition
+  claude-code/          ← (example) Claude Code engine — add your own!
 ```
 
-### How It Works
+### API Contract
+
+Every agent server image **must** expose at minimum these HTTP endpoints:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Liveness probe — return `{"status":"ok"}` |
+| `/asyncchat` | POST | Enqueue a message (with optional `session_config`); returns `{"queue_id": "..."}` |
+| `/cancel/{queue_id}` | DELETE | Cancel/disconnect the in-flight request for a given queue item |
+
+The server **must** POST streaming chunks and final responses back to `$WEBHOOK_URL` (injected by the operator). Optional endpoints for richer functionality:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/chat` | POST | Synchronous chat — blocks until the agent responds |
+| `/models` | GET | List available models (enables model picker in the UI) |
+| `/config/instructions` | GET/PUT | Manage instructions file on the PVC |
+| `/config/skills` | GET | List all skills on the PVC |
+| `/config/skills/{name}` | GET/PUT/DELETE | Manage individual skills |
+| `/config/agents` | GET/PUT | Manage custom agent definitions on the PVC |
+
+### GitHub Copilot SDK (Default Engine)
 
 The GitHub Copilot implementation uses the **GitHub Copilot Python SDK** (`CopilotClient`) to communicate with the Copilot CLI running in server mode via JSON-RPC. This replaces the previous subprocess-per-request approach with a persistent connection, proper session management, and typed streaming events.
 
@@ -651,29 +766,19 @@ sequenceDiagram
 ```
 
 **Key SDK features used:**
+
 - `CopilotClient(SubprocessConfig)` — singleton managing the CLI in server mode
 - `PermissionHandler.approve_all` — auto-approve tool executions
 - `asyncio.Semaphore(3)` — bounded concurrency for parallel sessions
 - `client.list_models()` — query available models for the settings UI
 - `session.on(callback)` — typed event streaming for real-time chunks
 
-**API surface the server exposes:**
+### Webhook Payloads
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/health` | GET | Liveness probe — return `{"status":"ok"}` |
-| `/asyncchat` | POST | Enqueue a message (with optional `session_config`); returns `{"queue_id": "..."}` |
-| `/chat` | POST | Synchronous chat — blocks until the agent responds |
-| `/cancel/{queue_id}` | DELETE | Disconnect the SDK session for a given queue item |
-| `/models` | GET | List available models via `client.list_models()` |
-| `/config/instructions` | GET/PUT | Read or update `copilot-instructions.md` on the PVC |
-| `/config/skills` | GET | List all skills on the PVC |
-| `/config/skills/{name}` | GET/PUT/DELETE | Read, create/update, or delete a skill |
-| `/config/agents` | GET/PUT | Read or update `custom-agents.json` on the PVC |
+Every agent server must POST these payloads to `$WEBHOOK_URL` (injected by the operator).
 
-**Webhook payloads the shim must POST to `$WEBHOOK_URL`:**
+**Chunk** (streamed during execution):
 
-Chunk (streamed during execution):
 ```json
 {
   "queue_id": "<uuid>",
@@ -687,7 +792,8 @@ Chunk (streamed during execution):
 }
 ```
 
-Final response (POST to `$WEBHOOK_URL`):
+**Final response** (POST to `$WEBHOOK_URL`):
+
 ```json
 {
   "queue_id": "<uuid>",
@@ -699,30 +805,31 @@ Final response (POST to `$WEBHOOK_URL`):
 }
 ```
 
-**Environment variables injected by the operator:**
+### Environment Variables
+
+Variables injected by the operator into the agent container:
 
 | Variable | Description |
 |---|---|
-| `GITHUB_TOKEN` | Auth token for the AI CLI |
+| `GITHUB_TOKEN` | Auth token from the `githubTokenSecretRef` (can be repurposed for any API key) |
 | `WEBHOOK_URL` | URL of the operator's internal webhook (`http://<svc>/response`) |
 | `COPILOT_HOME` | Persistent storage root (backed by a PV) |
 | `KUBECONFIG` | Path to kubeconfig if a `kubeconfigSecretRef` is set |
 
 **Skills and AGENT.md** are mounted into the container as ConfigMaps:
+
 - Skills ConfigMap → `/copilot-skills-staging/` → `entrypoint.sh` stages them into `$COPILOT_HOME/skills/<name>/SKILL.md`
 - AGENT.md ConfigMap → `$COPILOT_HOME/AGENT.md`
 
----
-
 ### Creating a New Agent Image (e.g., Claude Code)
 
-To support a different AI CLI (such as [Claude Code](https://docs.anthropic.com/en/docs/claude-code)), create a new subdirectory under `agent-server-container/`:
+To add a new AI engine (such as [Claude Code](https://docs.anthropic.com/en/docs/claude-code)), create a new subdirectory under `agent-server-container/` and implement the [API contract](#api-contract):
 
 ```mermaid
 graph TB
     subgraph repo["agent-server-container/"]
-        A["github-copilot/<br/><sub>existing · SDK-backed</sub>"]
-        B["claude-code/<br/><sub>new implementation</sub>"]
+        A["github-copilot/<br/><sub>default engine · Copilot SDK</sub>"]
+        B["claude-code/<br/><sub>example new engine</sub>"]
     end
 
     subgraph files["Required Files"]
@@ -739,9 +846,9 @@ graph TB
     style files fill:#16213e,stroke:#e94560,color:#e0e0e0
 ```
 
-#### 1. Write `entrypoint.sh`
+#### 1. Write entrypoint.sh
 
-Set up auth and launch `server.py`, example:
+Set up auth and launch `server.py`:
 
 ```bash
 #!/bin/bash
@@ -765,9 +872,9 @@ fi
 exec /opt/venv/bin/python /server.py
 ```
 
-#### 2. Write `server.py`
+#### 2. Write server.py
 
-Implement the three required endpoints. Example:
+Implement the three required endpoints:
 
 ```python
 import asyncio, httpx, json, os, subprocess, uuid
@@ -809,10 +916,10 @@ async def process(queue_id: str, req: AsyncChatRequest):
     # Launch Claude Code CLI — adapt flags to the actual binary
     cmd = ["claude", "--no-interactive", "--output-format", "stream-json",
            req.message]
-(.. ommitted ..)
+(.. omitted ..)
 ```
 
-#### 3. Write `Containerfile`
+#### 3. Write Containerfile
 
 ```dockerfile
 FROM python:3.12-slim
@@ -840,13 +947,13 @@ CLAUDE_IMG ?= quay.io/yourorg/kube-claude-code-agent-server:v1.0
 
 .PHONY: container-build-claude container-push-claude
 container-build-claude:
-	$(CONTAINER_TOOL) build -t $(CLAUDE_IMG) ./agent-server-container/claude-code/
+$(CONTAINER_TOOL) build -t $(CLAUDE_IMG) ./agent-server-container/claude-code/
 
 container-push-claude:
-	$(CONTAINER_TOOL) push $(CLAUDE_IMG)
+$(CONTAINER_TOOL) push $(CLAUDE_IMG)
 ```
 
-#### 5. Create a `KubeCopilotAgent` CR pointing to the new image
+#### 5. Create a KubeCopilotAgent CR pointing to the new image
 
 ```yaml
 apiVersion: kubecopilot.io/v1
@@ -863,7 +970,7 @@ spec:
   storageSize: "1Gi"
 ```
 
-The operator treats every `KubeCopilotAgent` the same way regardless of which CLI runs inside — as long as the shim implements the three-endpoint contract above, the full UI, streaming, session history, and cancellation features work automatically.
+The operator treats every `KubeCopilotAgent` the same way regardless of which AI engine runs inside — as long as the container implements the [API contract](#api-contract), the full UI, streaming, session history, and cancellation features work automatically.
 
 ---
 
@@ -910,8 +1017,8 @@ graph LR
         server_wh["server.go<br/><sub>receives chunks + responses</sub>"]
     end
 
-    subgraph agentsrv["agent-server-container/<br/>github-copilot/"]
-        srv["server.py<br/><sub>SDK-backed FastAPI</sub>"]
+    subgraph agentsrv["agent-server-container/"]
+        srv["server.py<br/><sub>pluggable engine (default: Copilot SDK)</sub>"]
         ep["entrypoint.sh"]
         cf["Containerfile"]
     end
@@ -962,11 +1069,17 @@ graph LR
 | `api/v1/` | CRD type definitions (`*_types.go`) |
 | `internal/controller/` | Reconciliation logic (agent, send, cancel controllers) |
 | `internal/webhook/` | HTTP server receiving chunks + responses from agent pod |
-| `agent-server-container/github-copilot/` | SDK-backed FastAPI server wrapping the Copilot CLI |
+| `agent-server-container/github-copilot/` | Default engine: SDK-backed FastAPI server wrapping the Copilot CLI |
 | `web-ui/` | FastAPI backend + single-page chat UI with settings panel |
 | `openshift-console-plugin/` | OpenShift Console dynamic plugin (embeds Web UI in Console) |
 | `config/` | Generated CRDs, RBAC, manager manifests, samples |
 | `helm/` | Helm charts for operator, agent instance, web UI, and console plugin |
+
+---
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your development environment, coding conventions, and how to submit pull requests.
 
 ---
 
