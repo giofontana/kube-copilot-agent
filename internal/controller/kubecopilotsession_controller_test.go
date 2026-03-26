@@ -41,21 +41,29 @@ var _ = Describe("KubeCopilotSession Controller", func() {
 	createAgentDeps := func(ctx context.Context, ns string) {
 		secret := &corev1.Secret{}
 		secretKey := types.NamespacedName{Name: "gh-token", Namespace: ns}
-		if err := k8sClient.Get(ctx, secretKey, secret); errors.IsNotFound(err) {
-			Expect(k8sClient.Create(ctx, &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "gh-token", Namespace: ns},
-				StringData: map[string]string{"GITHUB_TOKEN": "tok"},
-			})).To(Succeed())
+		if err := k8sClient.Get(ctx, secretKey, secret); err != nil {
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "gh-token", Namespace: ns},
+					StringData: map[string]string{"GITHUB_TOKEN": "tok"},
+				})).To(Succeed())
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+			}
 		}
 		agent := &agentv1.KubeCopilotAgent{}
 		agentKey := types.NamespacedName{Name: "test-agent", Namespace: ns}
-		if err := k8sClient.Get(ctx, agentKey, agent); errors.IsNotFound(err) {
-			Expect(k8sClient.Create(ctx, &agentv1.KubeCopilotAgent{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: ns},
-				Spec: agentv1.KubeCopilotAgentSpec{
-					GitHubTokenSecretRef: agentv1.SecretReference{Name: "gh-token"},
-				},
-			})).To(Succeed())
+		if err := k8sClient.Get(ctx, agentKey, agent); err != nil {
+			if errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, &agentv1.KubeCopilotAgent{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-agent", Namespace: ns},
+					Spec: agentv1.KubeCopilotAgentSpec{
+						GitHubTokenSecretRef: agentv1.SecretReference{Name: "gh-token"},
+					},
+				})).To(Succeed())
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+			}
 		}
 	}
 
@@ -190,6 +198,48 @@ var _ = Describe("KubeCopilotSession Controller", func() {
 
 			session := &agentv1.KubeCopilotSession{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, session)).To(Succeed())
+			Expect(session.Finalizers).To(ContainElement("kubecopilot.io/session-cleanup"))
+		})
+
+		It("should delete the session namespace when the Session is removed", func() {
+			controllerReconciler := &KubeCopilotSessionReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+			}
+
+			// First reconcile to ensure the namespace and finalizer are created.
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify namespace exists.
+			nsName := "kc-session-session-basic"
+			ns := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, ns)).To(Succeed())
+			Expect(ns.DeletionTimestamp.IsZero()).To(BeTrue())
+
+			// Delete the KubeCopilotSession resource.
+			session := &agentv1.KubeCopilotSession{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, session)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, session)).To(Succeed())
+
+			// Reconcile processes deletion: initiates namespace deletion and requeues.
+			result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: typeNamespacedName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			// Controller should requeue while waiting for namespace deletion.
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+			// Verify the namespace was marked for deletion.
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, ns)).To(Succeed())
+			Expect(ns.DeletionTimestamp.IsZero()).To(BeFalse())
+
+			// Verify the session phase is Terminating.
+			Expect(k8sClient.Get(ctx, typeNamespacedName, session)).To(Succeed())
+			Expect(session.Status.Phase).To(Equal("Terminating"))
+			// Finalizer should still be present (waiting for namespace deletion).
 			Expect(session.Finalizers).To(ContainElement("kubecopilot.io/session-cleanup"))
 		})
 	})

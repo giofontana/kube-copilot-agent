@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -102,11 +103,29 @@ func (r *KubeCopilotSessionReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	// 2. Create a deny-all NetworkPolicy when isolation is strict.
+	// 2. Reconcile NetworkPolicy based on isolation level.
 	if session.Spec.IsolationLevel == "" || session.Spec.IsolationLevel == "strict" {
 		if err := r.ensureNetworkPolicy(ctx, session, nsName); err != nil {
 			log.Error(err, "Failed to ensure NetworkPolicy")
 			return ctrl.Result{}, err
+		}
+	} else if session.Spec.IsolationLevel == "none" {
+		// When isolation is disabled, ensure any existing tenant-isolation NetworkPolicy is removed.
+		np := &networkingv1.NetworkPolicy{}
+		npKey := types.NamespacedName{
+			Name:      "tenant-isolation",
+			Namespace: nsName,
+		}
+		if err := r.Get(ctx, npKey, np); err != nil {
+			if !errors.IsNotFound(err) {
+				log.Error(err, "Failed to get NetworkPolicy for deletion")
+				return ctrl.Result{}, err
+			}
+		} else {
+			if err := r.Delete(ctx, np); err != nil && !errors.IsNotFound(err) {
+				log.Error(err, "Failed to delete NetworkPolicy when isolation is none")
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
@@ -119,6 +138,13 @@ func (r *KubeCopilotSessionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// 4. Update status.
 	session.Status.Namespace = nsName
 	session.Status.Phase = phaseActive
+	meta.SetStatusCondition(&session.Status.Conditions, metav1.Condition{
+		Type:               "Ready",
+		Status:             metav1.ConditionTrue,
+		Reason:             "Reconciled",
+		Message:            "Session is ready",
+		ObservedGeneration: session.GetGeneration(),
+	})
 	if err := r.Status().Update(ctx, session); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -128,6 +154,8 @@ func (r *KubeCopilotSessionReconciler) Reconcile(ctx context.Context, req ctrl.R
 }
 
 // handleDeletion removes the session namespace and the finalizer.
+// It waits for the namespace to be confirmed deleted before removing
+// the finalizer to prevent orphaned tenant namespaces.
 func (r *KubeCopilotSessionReconciler) handleDeletion(ctx context.Context, session *agentv1.KubeCopilotSession) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -140,13 +168,23 @@ func (r *KubeCopilotSessionReconciler) handleDeletion(ctx context.Context, sessi
 
 		nsName := sessionNamespaceName(session)
 		ns := &corev1.Namespace{}
-		if err := r.Get(ctx, types.NamespacedName{Name: nsName}, ns); err == nil {
-			log.Info("Deleting session namespace", "namespace", nsName)
-			if err := r.Delete(ctx, ns); err != nil && !errors.IsNotFound(err) {
-				return ctrl.Result{}, err
+		err := r.Get(ctx, types.NamespacedName{Name: nsName}, ns)
+		if err == nil {
+			// Namespace still exists — request deletion if not already deleting.
+			if ns.DeletionTimestamp.IsZero() {
+				log.Info("Deleting session namespace", "namespace", nsName)
+				if err := r.Delete(ctx, ns); err != nil && !errors.IsNotFound(err) {
+					return ctrl.Result{}, err
+				}
 			}
+			// Requeue until the namespace is fully removed.
+			log.Info("Waiting for namespace deletion", "namespace", nsName)
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		} else if !errors.IsNotFound(err) {
+			return ctrl.Result{}, err
 		}
 
+		// Namespace is confirmed gone — safe to remove the finalizer.
 		controllerutil.RemoveFinalizer(session, sessionFinalizer)
 		if err := r.Update(ctx, session); err != nil {
 			return ctrl.Result{}, err
@@ -201,16 +239,14 @@ func (r *KubeCopilotSessionReconciler) ensureNetworkPolicy(ctx context.Context, 
 			PolicyTypes: []networkingv1.PolicyType{
 				networkingv1.PolicyTypeIngress,
 			},
-			// Allow ingress only from the same namespace.
+			// Allow ingress only from pods within the same namespace.
 			Ingress: []networkingv1.NetworkPolicyIngressRule{
 				{
 					From: []networkingv1.NetworkPolicyPeer{
 						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									labelSessionNS: session.Name,
-								},
-							},
+							// Use a PodSelector-only peer to restrict ingress to pods
+							// within the same namespace.
+							PodSelector: &metav1.LabelSelector{},
 						},
 					},
 				},
