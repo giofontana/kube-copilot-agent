@@ -41,6 +41,9 @@ import (
 
 const (
 	defaultAgentImage = "quay.io/gfontana/kube-github-copilot-agent-server:v1.0"
+	// rbacFinalizerName is set on the KubeCopilotAgent to ensure cluster-scoped
+	// RBAC resources (ClusterRole, ClusterRoleBinding) are cleaned up on deletion.
+	rbacFinalizerName = "kubecopilot.io/rbac-cleanup"
 )
 
 // KubeCopilotAgentReconciler reconciles a KubeCopilotAgent object
@@ -77,6 +80,29 @@ func (r *KubeCopilotAgentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Reject invalid configuration: both fields are mutually exclusive.
+	if agent.Spec.RBAC != nil && agent.Spec.KubeconfigSecretRef != nil {
+		log.Error(nil, "spec.rbac and spec.kubeconfigSecretRef are mutually exclusive")
+		agent.Status.Phase = phaseError
+		_ = r.Status().Update(ctx, agent)
+		return ctrl.Result{}, nil
+	}
+
+	// Handle deletion: clean up cluster-scoped RBAC resources.
+	if !agent.DeletionTimestamp.IsZero() {
+		if containsFinalizer(agent, rbacFinalizerName) {
+			if err := r.cleanupClusterRBAC(ctx, agent); err != nil {
+				log.Error(err, "Failed to clean up cluster-scoped RBAC resources")
+				return ctrl.Result{}, err
+			}
+			removeFinalizer(agent, rbacFinalizerName)
+			if err := r.Update(ctx, agent); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// Assign AgentID if not set
 	if agent.Status.AgentID == "" {
 		agent.Status.AgentID = uuid.New().String()
@@ -108,6 +134,15 @@ func (r *KubeCopilotAgentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 		clusterRoleName := agent.Namespace + "-" + agent.Name + "-clusterrole"
 		if len(agent.Spec.RBAC.ClusterRules) > 0 {
+			// Ensure the finalizer is present so cluster-scoped resources are
+			// cleaned up when the agent is deleted.
+			if !containsFinalizer(agent, rbacFinalizerName) {
+				addFinalizer(agent, rbacFinalizerName)
+				if err := r.Update(ctx, agent); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
+
 			if err := r.ensureClusterRole(ctx, agent, clusterRoleName); err != nil {
 				log.Error(err, "Failed to ensure ClusterRole")
 				return ctrl.Result{}, err
@@ -484,33 +519,39 @@ func (r *KubeCopilotAgentReconciler) ensureRoleBinding(ctx context.Context, agen
 	name := roleName + "-binding"
 	key := types.NamespacedName{Name: name, Namespace: agent.Namespace}
 	err := r.Get(ctx, key, rb)
-	if err == nil {
-		return nil
-	}
-	if !errors.IsNotFound(err) {
+	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
-	rb = &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+	desiredSubjects := []rbacv1.Subject{
+		{
+			Kind:      rbacv1.ServiceAccountKind,
+			Name:      saName,
 			Namespace: agent.Namespace,
 		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      rbacv1.ServiceAccountKind,
-				Name:      saName,
+	}
+	desiredRoleRef := rbacv1.RoleRef{
+		APIGroup: rbacv1.GroupName,
+		Kind:     "Role",
+		Name:     roleName,
+	}
+
+	if errors.IsNotFound(err) {
+		rb = &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
 				Namespace: agent.Namespace,
 			},
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     "Role",
-			Name:     roleName,
-		},
+			Subjects: desiredSubjects,
+			RoleRef:  desiredRoleRef,
+		}
+		setOwnerRef(agent, rb)
+		return r.Create(ctx, rb)
 	}
-	setOwnerRef(agent, rb)
-	return r.Create(ctx, rb)
+
+	// Update subjects if they have changed.
+	rb.Subjects = desiredSubjects
+	return r.Update(ctx, rb)
 }
 
 func (r *KubeCopilotAgentReconciler) ensureClusterRole(ctx context.Context, agent *agentv1.KubeCopilotAgent, name string) error {
@@ -520,19 +561,17 @@ func (r *KubeCopilotAgentReconciler) ensureClusterRole(ctx context.Context, agen
 		return err
 	}
 
-	desired := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Rules: agent.Spec.RBAC.ClusterRules,
-	}
-
 	if errors.IsNotFound(err) {
-		setOwnerRef(agent, desired)
-		return r.Create(ctx, desired)
+		cr = &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+			},
+			Rules: agent.Spec.RBAC.ClusterRules,
+		}
+		return r.Create(ctx, cr)
 	}
 
-	cr.Rules = desired.Rules
+	cr.Rules = agent.Spec.RBAC.ClusterRules
 	return r.Update(ctx, cr)
 }
 
@@ -540,37 +579,42 @@ func (r *KubeCopilotAgentReconciler) ensureClusterRoleBinding(ctx context.Contex
 	crb := &rbacv1.ClusterRoleBinding{}
 	name := clusterRoleName + "-binding"
 	err := r.Get(ctx, types.NamespacedName{Name: name}, crb)
-	if err == nil {
-		return nil
-	}
-	if !errors.IsNotFound(err) {
+	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
-	crb = &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      rbacv1.ServiceAccountKind,
-				Name:      saName,
-				Namespace: agent.Namespace,
-			},
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     "ClusterRole",
-			Name:     clusterRoleName,
+	desiredSubjects := []rbacv1.Subject{
+		{
+			Kind:      rbacv1.ServiceAccountKind,
+			Name:      saName,
+			Namespace: agent.Namespace,
 		},
 	}
-	setOwnerRef(agent, crb)
-	return r.Create(ctx, crb)
+	desiredRoleRef := rbacv1.RoleRef{
+		APIGroup: rbacv1.GroupName,
+		Kind:     "ClusterRole",
+		Name:     clusterRoleName,
+	}
+
+	if errors.IsNotFound(err) {
+		crb = &rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+			},
+			Subjects: desiredSubjects,
+			RoleRef:  desiredRoleRef,
+		}
+		return r.Create(ctx, crb)
+	}
+
+	// Update subjects if they have changed.
+	crb.Subjects = desiredSubjects
+	return r.Update(ctx, crb)
 }
 
-// ensureKubeconfigSecret creates a Secret containing a kubeconfig that uses
-// the ServiceAccount token for authentication. The generated kubeconfig
-// points to the in-cluster API server by default.
+// ensureKubeconfigSecret creates or updates a Secret containing a kubeconfig
+// that uses the ServiceAccount token for authentication. The generated
+// kubeconfig points to the in-cluster API server by default.
 func (r *KubeCopilotAgentReconciler) ensureKubeconfigSecret(
 	ctx context.Context,
 	agent *agentv1.KubeCopilotAgent,
@@ -578,14 +622,39 @@ func (r *KubeCopilotAgentReconciler) ensureKubeconfigSecret(
 ) error {
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: agent.Namespace}, secret)
-	if err == nil {
-		return nil
-	}
-	if !errors.IsNotFound(err) {
+	if err != nil && !errors.IsNotFound(err) {
 		return err
 	}
 
-	// Resolve API server address and CA data.
+	kubeconfig := r.buildKubeconfig(agent, saName)
+
+	if errors.IsNotFound(err) {
+		secret = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: agent.Namespace,
+			},
+			StringData: map[string]string{
+				"config": kubeconfig,
+			},
+		}
+		setOwnerRef(agent, secret)
+		return r.Create(ctx, secret)
+	}
+
+	// Update the kubeconfig if it has changed.
+	if string(secret.Data["config"]) != kubeconfig {
+		secret.StringData = map[string]string{
+			"config": kubeconfig,
+		}
+		return r.Update(ctx, secret)
+	}
+	return nil
+}
+
+// buildKubeconfig generates a kubeconfig YAML string that uses the projected
+// ServiceAccount token for authentication.
+func (r *KubeCopilotAgentReconciler) buildKubeconfig(agent *agentv1.KubeCopilotAgent, saName string) string {
 	server := r.APIServerURL
 	if server == "" {
 		server = "https://kubernetes.default.svc"
@@ -599,8 +668,7 @@ func (r *KubeCopilotAgentReconciler) ensureKubeconfigSecret(
 		caBlock = "    certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 	}
 
-	// Build a kubeconfig that uses the projected ServiceAccount token.
-	kubeconfig := fmt.Sprintf(`apiVersion: v1
+	return fmt.Sprintf(`apiVersion: v1
 kind: Config
 clusters:
 - cluster:
@@ -619,18 +687,6 @@ users:
   user:
     tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
 `, server, caBlock, agent.Namespace, saName, saName)
-
-	secret = &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: agent.Namespace,
-		},
-		StringData: map[string]string{
-			"config": kubeconfig,
-		},
-	}
-	setOwnerRef(agent, secret)
-	return r.Create(ctx, secret)
 }
 
 // setOwnerRef sets an owner reference on obj pointing to agent without using
@@ -646,4 +702,54 @@ func setOwnerRef(agent *agentv1.KubeCopilotAgent, obj metav1.Object) {
 			Controller: &isController,
 		},
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Finalizer helpers
+// ---------------------------------------------------------------------------
+
+func containsFinalizer(agent *agentv1.KubeCopilotAgent, finalizer string) bool {
+	for _, f := range agent.Finalizers {
+		if f == finalizer {
+			return true
+		}
+	}
+	return false
+}
+
+func addFinalizer(agent *agentv1.KubeCopilotAgent, finalizer string) {
+	agent.Finalizers = append(agent.Finalizers, finalizer)
+}
+
+func removeFinalizer(agent *agentv1.KubeCopilotAgent, finalizer string) {
+	var result []string
+	for _, f := range agent.Finalizers {
+		if f != finalizer {
+			result = append(result, f)
+		}
+	}
+	agent.Finalizers = result
+}
+
+// cleanupClusterRBAC deletes the ClusterRole and ClusterRoleBinding created
+// for the agent. These are cluster-scoped so they cannot use ownerReferences
+// for garbage collection and must be explicitly removed.
+func (r *KubeCopilotAgentReconciler) cleanupClusterRBAC(ctx context.Context, agent *agentv1.KubeCopilotAgent) error {
+	clusterRoleName := agent.Namespace + "-" + agent.Name + "-clusterrole"
+
+	crb := &rbacv1.ClusterRoleBinding{}
+	if err := r.Get(ctx, types.NamespacedName{Name: clusterRoleName + "-binding"}, crb); err == nil {
+		if err := r.Delete(ctx, crb); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	cr := &rbacv1.ClusterRole{}
+	if err := r.Get(ctx, types.NamespacedName{Name: clusterRoleName}, cr); err == nil {
+		if err := r.Delete(ctx, cr); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
 }

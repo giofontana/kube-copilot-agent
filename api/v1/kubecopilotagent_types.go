@@ -25,6 +25,7 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // KubeCopilotAgentSpec defines the desired state of KubeCopilotAgent
+// +kubebuilder:validation:XValidation:rule="!(has(self.kubeconfigSecretRef) && has(self.rbac))",message="kubeconfigSecretRef and rbac are mutually exclusive"
 type KubeCopilotAgentSpec struct {
 	// GitHubTokenSecretRef references a Secret containing key GITHUB_TOKEN.
 	// +required

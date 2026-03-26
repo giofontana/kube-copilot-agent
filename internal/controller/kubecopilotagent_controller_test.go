@@ -171,6 +171,12 @@ var _ = Describe("KubeCopilotAgent Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("Removing the finalizer if present so the agent can be deleted")
+			if len(resource.Finalizers) > 0 {
+				resource.Finalizers = nil
+				Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+			}
+
 			By("Cleanup the specific resource instance KubeCopilotAgent")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 
@@ -274,6 +280,24 @@ var _ = Describe("KubeCopilotAgent Controller", func() {
 				Name:      "my-custom-sa",
 				Namespace: "default",
 			}, sa)).To(Succeed())
+
+			By("Verifying RoleBinding references the custom ServiceAccount")
+			rb := &rbacv1.RoleBinding{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      resourceName + "-role-binding",
+				Namespace: "default",
+			}, rb)).To(Succeed())
+			Expect(rb.Subjects).To(HaveLen(1))
+			Expect(rb.Subjects[0].Name).To(Equal("my-custom-sa"))
+
+			By("Verifying ClusterRoleBinding references the custom ServiceAccount")
+			clusterRoleName := "default-" + resourceName + "-clusterrole"
+			crb := &rbacv1.ClusterRoleBinding{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: clusterRoleName + "-binding",
+			}, crb)).To(Succeed())
+			Expect(crb.Subjects).To(HaveLen(1))
+			Expect(crb.Subjects[0].Name).To(Equal("my-custom-sa"))
 		})
 
 		It("should update Role rules when spec changes", func() {

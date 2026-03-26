@@ -212,6 +212,9 @@ spec:
             required:
             - githubTokenSecretRef
             type: object
+            x-kubernetes-validations:
+            - message: kubeconfigSecretRef and rbac are mutually exclusive
+              rule: '!(has(self.kubeconfigSecretRef) && has(self.rbac))'
           status:
             description: KubeCopilotAgentStatus defines the observed state of KubeCopilotAgent.
             properties:

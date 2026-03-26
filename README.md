@@ -713,7 +713,7 @@ When you set `spec.rbac` in a `KubeCopilotAgent`, the operator:
 6. **Generates a kubeconfig Secret** that uses the ServiceAccount token for authentication
 7. **Mounts the kubeconfig** into the agent pod at `/copilot/.kube/config`
 
-All resources are owned by the `KubeCopilotAgent` and garbage-collected when it is deleted.
+Namespace-scoped resources created for the agent (ServiceAccount, Role, RoleBinding, kubeconfig Secret, etc.) are owned by the `KubeCopilotAgent` and are garbage-collected when the agent is deleted. Cluster-scoped resources (ClusterRole and ClusterRoleBinding) cannot use a namespaced `KubeCopilotAgent` as a direct owner reference; they are instead tracked via a finalizer and cleaned up by the controller when the agent is deleted.
 
 > [!NOTE]
 > `spec.rbac` is mutually exclusive with `spec.kubeconfigSecretRef`. Use one or the other.
@@ -802,7 +802,7 @@ kubectl auth can-i list namespaces \
   --as=system:serviceaccount:kube-copilot-agent:my-agent-sa
 
 # Inspect the generated RBAC resources
-kubectl get sa,role,rolebinding -n kube-copilot-agent -l app.kubernetes.io/managed-by=kube-copilot-agent
+kubectl get sa,role,rolebinding -n kube-copilot-agent | grep my-agent
 kubectl get clusterrole,clusterrolebinding | grep my-agent
 ```
 
