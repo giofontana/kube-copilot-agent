@@ -10,8 +10,8 @@ keywords:
   - copilot
   - operator
   - kubernetes
-home: https://github.com/gfontana/kube-copilot-agent
+home: https://github.com/giofontana/kube-copilot-agent
 sources:
-  - https://github.com/gfontana/kube-copilot-agent
+  - https://github.com/giofontana/kube-copilot-agent
 maintainers:
-  - name: gfontana
+  - name: giofontana

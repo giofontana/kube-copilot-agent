@@ -10,3 +10,8 @@ keywords:
   - console-plugin
   - kubecopilot
   - ai-agent
+home: https://github.com/giofontana/kube-copilot-agent
+sources:
+  - https://github.com/giofontana/kube-copilot-agent
+maintainers:
+  - name: giofontana

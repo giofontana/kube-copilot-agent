@@ -1,0 +1,20 @@
+kube-copilot-console-plugin has been deployed!
+
+Namespace:  {{ .Release.Namespace }}
+Plugin:     {{ template "kube-copilot-console-plugin.name" . }}
+
+{{- if .Values.plugin.jobs.patchConsoles.enabled }}
+
+The plugin will be automatically enabled in the OpenShift Console via a post-install hook.
+{{- else }}
+
+Enable the plugin manually:
+  oc patch consoles.operator.openshift.io cluster --type=json \
+    -p '[{"op": "add", "path": "/spec/plugins/-", "value": "{{ template "kube-copilot-console-plugin.name" . }}"}]'
+{{- end }}
+
+Verify the plugin is registered:
+  oc get consoleplugin {{ template "kube-copilot-console-plugin.name" . }}
+
+Check deployment status:
+  kubectl get deployment {{ template "kube-copilot-console-plugin.name" . }} -n {{ .Release.Namespace }}
