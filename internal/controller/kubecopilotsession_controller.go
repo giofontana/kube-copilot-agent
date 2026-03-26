@@ -274,9 +274,8 @@ func (r *KubeCopilotSessionReconciler) ensureRBAC(ctx context.Context, session *
 			},
 			Subjects: []rbacv1.Subject{
 				{
-					Kind:      rbacv1.GroupKind,
-					Name:      fmt.Sprintf("kubecopilot:tenant:%s", session.Spec.TenantID),
-					Namespace: nsName,
+					Kind: rbacv1.GroupKind,
+					Name: fmt.Sprintf("kubecopilot:tenant:%s", session.Spec.TenantID),
 				},
 			},
 		}
