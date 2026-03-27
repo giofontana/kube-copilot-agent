@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -713,12 +714,7 @@ func setOwnerRef(agent *agentv1.KubeCopilotAgent, obj metav1.Object) {
 // ---------------------------------------------------------------------------
 
 func containsFinalizer(agent *agentv1.KubeCopilotAgent, finalizer string) bool {
-	for _, f := range agent.Finalizers {
-		if f == finalizer {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(agent.Finalizers, finalizer)
 }
 
 func addFinalizer(agent *agentv1.KubeCopilotAgent, finalizer string) {
