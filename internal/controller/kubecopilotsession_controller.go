@@ -104,12 +104,13 @@ func (r *KubeCopilotSessionReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// 2. Reconcile NetworkPolicy based on isolation level.
-	if session.Spec.IsolationLevel == "" || session.Spec.IsolationLevel == "strict" {
+	switch session.Spec.IsolationLevel {
+	case "", "strict":
 		if err := r.ensureNetworkPolicy(ctx, session, nsName); err != nil {
 			log.Error(err, "Failed to ensure NetworkPolicy")
 			return ctrl.Result{}, err
 		}
-	} else if session.Spec.IsolationLevel == "none" {
+	case "none":
 		// When isolation is disabled, ensure any existing tenant-isolation NetworkPolicy is removed.
 		np := &networkingv1.NetworkPolicy{}
 		npKey := types.NamespacedName{
