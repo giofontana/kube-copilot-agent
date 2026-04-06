@@ -215,8 +215,8 @@ async def get_tasks(agent_ref: str = Query(...)):
     """Proxy /tasks from the agent server to get background tasks."""
     try:
         return await k8s_client.proxy_agent_get(agent_ref, settings.namespace, "/tasks")
-    except Exception as e:
-        return {"tasks": [], "error": str(e)}
+    except Exception:
+        return {"tasks": []}
 
 
 # ── Models proxy ─────────────────────────────────────────────────────────────
