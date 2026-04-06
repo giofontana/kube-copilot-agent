@@ -187,9 +187,12 @@ async def notifications_stream(
     async def generate():
         seen_names: set[str] = set()
 
+        def _fetch():
+            return k8s_client.list_notifications(agent_ref, session_id, settings.namespace)
+
         # Initial load
         try:
-            for notif in k8s_client.list_notifications(agent_ref, session_id, settings.namespace):
+            for notif in await asyncio.to_thread(_fetch):
                 seen_names.add(notif["name"])
                 yield {"event": "notification", "data": json.dumps(notif)}
         except Exception as e:
@@ -200,7 +203,7 @@ async def notifications_stream(
         while True:
             await asyncio.sleep(2)
             try:
-                for notif in k8s_client.list_notifications(agent_ref, session_id, settings.namespace):
+                for notif in await asyncio.to_thread(_fetch):
                     if notif["name"] not in seen_names:
                         seen_names.add(notif["name"])
                         yield {"event": "notification", "data": json.dumps(notif)}

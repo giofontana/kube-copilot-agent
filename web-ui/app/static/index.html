@@ -1583,7 +1583,7 @@ async function deleteProvider() {
 // Notification support
 // =============================================================
 let _notifEventSource = null;
-const _seenNotifications = new Set();
+let _seenNotifications = new Set();
 
 function buildNotificationBubble(notif) {
   const typeClass = notif.notification_type ? `notif-${esc(notif.notification_type)}` : '';
@@ -1617,6 +1617,8 @@ function showNotificationToast(notif) {
 
 function startNotificationStream(sessionId) {
   stopNotificationStream();
+  // Reset seen set when switching sessions so SSE replay renders correctly
+  _seenNotifications = new Set();
   if (!currentAgent || !sessionId) return;
   const url = `/notifications/stream?agent_ref=${enc(currentAgent)}&session_id=${enc(sessionId)}`;
   _notifEventSource = new EventSource(url);

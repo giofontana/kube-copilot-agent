@@ -241,8 +241,8 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if payload.SessionID == "" || payload.Message == "" {
-		http.Error(w, "session_id and message are required", http.StatusBadRequest)
+	if payload.SessionID == "" || payload.Message == "" || payload.AgentRef == "" {
+		http.Error(w, "session_id, agent_ref, and message are required", http.StatusBadRequest)
 		return
 	}
 
@@ -297,7 +297,9 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 
 	// Stamp the createdAt status
 	notif.Status.CreatedAt = &now
-	_ = s.k8sClient.Status().Update(ctx, notif)
+	if err := s.k8sClient.Status().Update(ctx, notif); err != nil {
+		log.Error(err, "Failed to update KubeCopilotNotification status", "name", name, "namespace", namespace)
+	}
 
 	log.Info("Created KubeCopilotNotification", "name", name, "namespace", namespace, "sessionID", payload.SessionID)
 	w.WriteHeader(http.StatusCreated)

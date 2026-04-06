@@ -12,6 +12,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from typing import Any
 import httpx
 from copilot import CopilotClient, PermissionHandler, SubprocessConfig
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 app = FastAPI(title="KubeCopilot Agent")
 
@@ -489,6 +490,7 @@ async def _handle_async_item(item: dict):
 
 _background_tasks: dict[str, dict] = {}
 _task_runner_started = False
+_tasks_lock = asyncio.Lock()
 
 
 def _load_tasks() -> dict[str, dict]:
@@ -504,12 +506,17 @@ def _load_tasks() -> dict[str, dict]:
 
 
 def _save_tasks():
-    """Persist active tasks to disk for pod restart survival."""
+    """Persist active tasks to disk atomically for pod restart survival."""
     serialisable = {}
     for tid, task in _background_tasks.items():
         serialisable[tid] = {k: v for k, v in task.items() if k != "_asyncio_task"}
     try:
-        TASKS_FILE.write_text(json.dumps(serialisable, indent=2))
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(TASKS_FILE.parent), suffix=".tmp",
+        )
+        with os.fdopen(fd, "w") as f:
+            json.dump(serialisable, f, indent=2)
+        os.replace(tmp_path, str(TASKS_FILE))
     except OSError as e:
         print(f"[tasks] Failed to persist tasks: {e}")
 
@@ -519,24 +526,50 @@ async def _post_notification(
     message: str, notification_type: str = "info",
     title: str = "", task_ref: str = "",
 ):
-    """POST a one-way notification to the operator webhook."""
+    """POST a one-way notification to the operator webhook with retry."""
     notification_url = WEBHOOK_URL.replace("/response", "/notification") if WEBHOOK_URL else ""
     if not notification_url:
         print(f"[tasks] No WEBHOOK_URL configured, cannot send notification")
         return
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as http:
-            await http.post(notification_url, json={
-                "session_id": session_id,
-                "agent_ref": agent_ref,
-                "namespace": namespace,
-                "message": message,
-                "notification_type": notification_type,
-                "title": title,
-                "task_ref": task_ref,
-            })
-    except Exception as e:
-        print(f"[tasks] Notification POST failed: {e}")
+
+    payload = {
+        "session_id": session_id,
+        "agent_ref": agent_ref,
+        "namespace": namespace,
+        "message": message,
+        "notification_type": notification_type,
+        "title": title,
+        "task_ref": task_ref,
+    }
+
+    max_attempts = 3
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await http.post(notification_url, json=payload)
+                if response.is_success:
+                    return
+
+                response_body = response.text.strip()
+                if len(response_body) > 500:
+                    response_body = response_body[:500] + "...[truncated]"
+
+                print(
+                    f"[tasks] Notification POST returned HTTP {response.status_code} "
+                    f"on attempt {attempt}/{max_attempts}: {response_body}"
+                )
+
+                if response.status_code < 500 or attempt == max_attempts:
+                    return
+            except httpx.RequestError as e:
+                print(
+                    f"[tasks] Notification POST failed on attempt "
+                    f"{attempt}/{max_attempts}: {e}"
+                )
+                if attempt == max_attempts:
+                    return
+
+            await asyncio.sleep(min(2 ** (attempt - 1), 4))
 
 
 async def _check_resource_condition(task: dict) -> bool:
@@ -655,14 +688,16 @@ async def _run_background_task(task_id: str):
     checker = _TASK_CHECKERS.get(task_type)
 
     if not checker:
-        task["status"] = "failed"
-        task["error"] = f"Unknown task type: {task_type}"
-        _save_tasks()
+        async with _tasks_lock:
+            task["status"] = "failed"
+            task["error"] = f"Unknown task type: {task_type}"
+            _save_tasks()
         return
 
     elapsed = 0
-    task["status"] = "running"
-    _save_tasks()
+    async with _tasks_lock:
+        task["status"] = "running"
+        _save_tasks()
 
     while elapsed < timeout:
         await asyncio.sleep(check_interval)
@@ -679,8 +714,9 @@ async def _run_background_task(task_id: str):
             condition_met = False
 
         if condition_met:
-            task["status"] = "completed"
-            _save_tasks()
+            async with _tasks_lock:
+                task["status"] = "completed"
+                _save_tasks()
 
             # Send notification
             msg = task.get("notification_message", "Background task completed")
@@ -698,8 +734,9 @@ async def _run_background_task(task_id: str):
             return
 
     # Timeout reached
-    task["status"] = "timed_out"
-    _save_tasks()
+    async with _tasks_lock:
+        task["status"] = "timed_out"
+        _save_tasks()
     await _post_notification(
         session_id=task.get("session_id", ""),
         agent_ref=task.get("agent_ref", ""),
@@ -874,10 +911,10 @@ async def chat(req: ChatRequest):
 
 class MonitorTaskRequest(BaseModel):
     session_id: str
-    agent_ref: str = ""
+    agent_ref: str
     namespace: str = ""
     task_type: str = "monitor_resource"
-    config: dict = {}
+    config: dict = Field(default_factory=dict)
     check_interval: int = 30
     timeout: int = 3600
     notification_message: str = "Background task completed"
@@ -911,33 +948,36 @@ async def create_monitor_task(req: MonitorTaskRequest):
         "status": "pending",
     }
 
-    _background_tasks[task_id] = task
-    _save_tasks()
+    async with _tasks_lock:
+        _background_tasks[task_id] = task
+        _save_tasks()
     asyncio.create_task(_run_background_task(task_id))
 
     return {"task_id": task_id, "status": "created"}
 
 
 @app.get("/tasks")
-def list_tasks():
+async def list_tasks():
     """List all background tasks."""
-    tasks = []
-    for tid, task in _background_tasks.items():
-        tasks.append({
-            "task_id": tid,
-            "task_type": task.get("task_type", ""),
-            "status": task.get("status", ""),
-            "session_id": task.get("session_id", ""),
-            "title": task.get("title", ""),
-            "config": task.get("config", {}),
-        })
+    async with _tasks_lock:
+        tasks = []
+        for tid, task in _background_tasks.items():
+            tasks.append({
+                "task_id": tid,
+                "task_type": task.get("task_type", ""),
+                "status": task.get("status", ""),
+                "session_id": task.get("session_id", ""),
+                "title": task.get("title", ""),
+                "config": task.get("config", {}),
+            })
     return {"tasks": tasks}
 
 
 @app.get("/tasks/{task_id}")
-def get_task(task_id: str):
+async def get_task(task_id: str):
     """Get details of a specific background task."""
-    task = _background_tasks.get(task_id)
+    async with _tasks_lock:
+        task = _background_tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return {
@@ -955,12 +995,13 @@ def get_task(task_id: str):
 
 
 @app.delete("/tasks/{task_id}")
-def delete_task(task_id: str):
+async def delete_task(task_id: str):
     """Cancel and remove a background task."""
-    task = _background_tasks.pop(task_id, None)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    _save_tasks()
+    async with _tasks_lock:
+        task = _background_tasks.pop(task_id, None)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        _save_tasks()
     return {"status": "deleted", "task_id": task_id}
 
 

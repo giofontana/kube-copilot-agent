@@ -74,6 +74,7 @@ func TestHandleNotification_DefaultNamespace(t *testing.T) {
 
 	payload := NotificationPayload{
 		SessionID: "test-session",
+		AgentRef:  "test-agent",
 		Message:   "Task completed",
 	}
 
@@ -100,6 +101,7 @@ func TestHandleNotification_DefaultNotificationType(t *testing.T) {
 	// No notification_type provided — should default to "info"
 	payload := NotificationPayload{
 		SessionID: "test-session",
+		AgentRef:  "test-agent",
 		Message:   "Something happened",
 	}
 
@@ -118,7 +120,8 @@ func TestHandleNotification_MissingSessionID(t *testing.T) {
 	s := newTestServer()
 
 	payload := NotificationPayload{
-		Message: "Missing session",
+		AgentRef: "test-agent",
+		Message:  "Missing session",
 	}
 
 	body, _ := json.Marshal(payload)
@@ -137,6 +140,7 @@ func TestHandleNotification_MissingMessage(t *testing.T) {
 
 	payload := NotificationPayload{
 		SessionID: "test-session",
+		AgentRef:  "test-agent",
 	}
 
 	body, _ := json.Marshal(payload)
@@ -150,11 +154,31 @@ func TestHandleNotification_MissingMessage(t *testing.T) {
 	}
 }
 
+func TestHandleNotification_MissingAgentRef(t *testing.T) {
+	s := newTestServer()
+
+	payload := NotificationPayload{
+		SessionID: "test-session",
+		Message:   "Missing agent ref",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/notification", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	s.handleNotification(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for missing agent_ref, got %d", w.Code)
+	}
+}
+
 func TestHandleNotification_InvalidNotificationType(t *testing.T) {
 	s := newTestServer()
 
 	payload := NotificationPayload{
 		SessionID:        "test-session",
+		AgentRef:         "test-agent",
 		Message:          "Test",
 		NotificationType: "invalid",
 	}
