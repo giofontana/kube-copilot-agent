@@ -2,6 +2,8 @@
 
 This document outlines the high-level roadmap for KubeCopilot. For detailed tracking, see the [GitHub Issues](https://github.com/giofontana/kube-copilot-agent/issues) and [Project Board](https://github.com/giofontana/kube-copilot-agent/projects).
 
+📋 **[View the project board →](https://github.com/users/samueltauil/projects/10)**
+
 ## Current Focus
 
 ### v1.x — Foundation
@@ -17,6 +19,8 @@ This document outlines the high-level roadmap for KubeCopilot. For detailed trac
 - 🔄 Multi-tenant session isolation ([#5](https://github.com/giofontana/kube-copilot-agent/issues/5))
 - 🔄 Background notification system ([#13](https://github.com/giofontana/kube-copilot-agent/issues/13))
 - 🔄 Helm chart standardization ([#11](https://github.com/giofontana/kube-copilot-agent/issues/11))
+- 🔄 OpenShift Console Plugin fix ([#3](https://github.com/giofontana/kube-copilot-agent/issues/3))
+- 🔄 Project Website — kubecopilot.io ([#6](https://github.com/giofontana/kube-copilot-agent/issues/6))
 
 ### Next — Ecosystem & Enterprise Readiness
 - 🔜 MCP Server Integration ([#15](https://github.com/giofontana/kube-copilot-agent/issues/15)) — **Critical**
@@ -30,7 +34,6 @@ This document outlines the high-level roadmap for KubeCopilot. For detailed trac
 - 📋 Agent-to-Agent Communication ([#19](https://github.com/giofontana/kube-copilot-agent/issues/19))
 - 📋 Cost Tracking & Token Metrics ([#21](https://github.com/giofontana/kube-copilot-agent/issues/21))
 - 📋 ModelConfig CRD ([#23](https://github.com/giofontana/kube-copilot-agent/issues/23))
-- 📋 Project Website — kubecopilot.io ([#6](https://github.com/giofontana/kube-copilot-agent/issues/6))
 
 ## Legend
 - ✅ Completed
