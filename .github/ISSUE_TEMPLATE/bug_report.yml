@@ -1,0 +1,81 @@
+name: 🐛 Bug Report
+description: Report a bug in KubeCopilot
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below to help us reproduce and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Deploy the operator with `helm upgrade --install ...`
+        2. Create a KubeCopilotAgent CR
+        3. Send a message via KubeCopilotSend
+        4. Observe the error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened? Include logs, error messages, or screenshots.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: KubeCopilot version
+      description: Operator image tag or Helm chart version.
+      placeholder: "v1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where are you running KubeCopilot?
+      options:
+        - Kubernetes (vanilla)
+        - OpenShift
+        - Kind (local)
+        - Minikube (local)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: k8s-version
+    attributes:
+      label: Kubernetes / OpenShift version
+      placeholder: "v1.30.0 / OCP 4.16"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might be relevant (config, CRD YAML, screenshots).
