@@ -68,6 +68,15 @@ kubectl create secret generic cluster-kubeconfig \
   -n kube-copilot-agent
 ```
 
+### ServiceAccount-Based Permissions
+
+Instead of supplying a kubeconfig secret manually, you can let the operator provision RBAC resources automatically. Set `spec.rbac` on the agent CR (or use the `rbac` Helm values) to create a dedicated ServiceAccount, Role/ClusterRole, bindings, and a generated kubeconfig Secret — all with the least-privilege rules you specify.
+
+See [Configuration — ServiceAccount-Based Permissions](configuration.md#serviceaccount-based-permissions) for the full reference and examples.
+
+> [!NOTE]
+> `spec.rbac` and `spec.kubeconfigSecretRef` are mutually exclusive; set only one.
+
 ## Step 3 — Deploy the GitHub Copilot Agent
 
 The `github-copilot-agent` chart creates the `KubeCopilotAgent` CR, a GitHub token Secret, and ConfigMaps for skills and `AGENT.md`. Default skills (monitor, deploy, troubleshoot) and a SysAdmin persona are included out of the box.
@@ -141,7 +150,8 @@ helm upgrade --install my-agent ./helm/github-copilot-agent \
 | `githubToken.secretKey` | `GITHUB_TOKEN` | Key inside the secret |
 | `image` | `""` | Override the agent container image |
 | `storageSize` | `1Gi` | PVC size for session history |
-| `kubeconfigSecretRef` | `""` | Existing Secret name with a kubeconfig |
+| `kubeconfigSecretRef` | `""` | Existing Secret name with a kubeconfig; mutually exclusive with `rbac` |
+| `rbac` | `{}` | ServiceAccount-based RBAC config (`serviceAccountName`, `rules`, `clusterRules`); mutually exclusive with `kubeconfigSecretRef` — see [ServiceAccount-Based Permissions](#serviceaccount-based-permissions) |
 | `createSkillsConfigMap` | `true` | Create a skills ConfigMap from `skillsContent` |
 | `skillsConfigMap` | `""` | Reference an existing skills ConfigMap |
 | `createAgentConfigMap` | `true` | Create an AGENT.md ConfigMap from `agentContent` |

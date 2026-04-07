@@ -104,7 +104,7 @@ sequenceDiagram
 
 | CRD | Purpose |
 |---|---|
-| `KubeCopilotAgent` | Declares an agent instance (image, credentials, skills, instructions) |
+| `KubeCopilotAgent` | Declares an agent instance (image, credentials, skills, instructions, and optional ServiceAccount-based RBAC) |
 | `KubeCopilotSend` | Send a message to an agent; dispatched to the agent server |
 | `KubeCopilotResponse` | Final response from the agent (written by operator webhook) |
 | `KubeCopilotChunk` | Real-time streaming events (thinking, tool calls, results) |

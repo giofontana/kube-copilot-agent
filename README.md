@@ -47,6 +47,7 @@ KubeCopilot runs on **both vanilla Kubernetes and OpenShift**, with a native Ope
 ## Features
 
 - **Pluggable agent engines** — swap the AI backend by changing the container image in your `KubeCopilotAgent` CR
+- **Least-privilege RBAC** — declare `spec.rbac` rules on a `KubeCopilotAgent` and the operator auto-provisions a ServiceAccount, Role/ClusterRole, bindings, and a kubeconfig Secret
 - **Multi-turn conversations** with session continuity
 - **Real-time streaming** of agent activity via `KubeCopilotChunk` CRDs
 - **Custom skills** loaded from a ConfigMap or managed at runtime via the UI
