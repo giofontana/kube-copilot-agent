@@ -45,6 +45,7 @@ rules:
   - kubecopilotcancels
   - kubecopilotchunks
   - kubecopilotmessages
+  - kubecopilotnotifications
   - kubecopilotsends
   - kubecopilotsessions
   verbs:
@@ -71,6 +72,7 @@ rules:
   - kubecopilotcancels/status
   - kubecopilotchunks/status
   - kubecopilotmessages/status
+  - kubecopilotnotifications/status
   - kubecopilotsends/status
   - kubecopilotsessions/status
   verbs:

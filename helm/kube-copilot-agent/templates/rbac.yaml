@@ -37,6 +37,7 @@ rules:
   - kubecopilotcancels
   - kubecopilotchunks
   - kubecopilotmessages
+  - kubecopilotnotifications
   - kubecopilotsends
   - kubecopilotsessions
   verbs: [create, delete, get, list, patch, update, watch]
@@ -53,6 +54,7 @@ rules:
   - kubecopilotcancels/status
   - kubecopilotchunks/status
   - kubecopilotmessages/status
+  - kubecopilotnotifications/status
   - kubecopilotsends/status
   - kubecopilotsessions/status
   verbs: [get, patch, update]
