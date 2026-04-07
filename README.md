@@ -55,6 +55,8 @@ KubeCopilot runs on **both vanilla Kubernetes and OpenShift**, with a native Ope
 - **Dynamic model selection** — switch models at runtime without redeploying
 - **BYOK (Bring Your Own Key)** — use an external OpenAI-compatible or Azure OpenAI provider, with API keys stored securely in Kubernetes Secrets
 - **Cancellation** of in-flight requests
+- **Asynchronous notifications** — agents push one-way notifications to user sessions via `KubeCopilotNotification` CRDs, with inline bubbles and toast popups in the UI
+- **Background task monitoring** — register long-running monitors (resource conditions, pod phases) that fire a notification when complete
 - **Web UI** with a settings panel for chatting with agents, browsing session history, and configuring agent behaviour at runtime
 - **OpenShift Console Plugin** — embed the UI directly inside the OpenShift Web Console
 
@@ -110,7 +112,7 @@ See [Agent Server Container](#agent-server-container) for the full pluggable arc
 
 ## Architecture
 
-The operator reconciles CRDs (`KubeCopilotSend`, `KubeCopilotChunk`, `KubeCopilotResponse`, `KubeCopilotCancel`) and delegates work to a pluggable agent server pod. The Web UI creates CRs and streams results back to the user via SSE.
+The operator reconciles CRDs (`KubeCopilotSend`, `KubeCopilotChunk`, `KubeCopilotResponse`, `KubeCopilotCancel`, `KubeCopilotNotification`) and delegates work to a pluggable agent server pod. The Web UI creates CRs and streams results back to the user via SSE. Background tasks in the agent server can push one-way notifications through the operator webhook, which creates `KubeCopilotNotification` CRs that the UI streams to the user in real time.
 
 For detailed architecture diagrams and CRD descriptions, see **[Architecture](docs/architecture.md)**.
 
