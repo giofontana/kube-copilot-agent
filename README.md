@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⎈ KubeCopilot
+# KubeCopilot
 
 **The pluggable, engine-agnostic AI agent platform for Kubernetes and OpenShift**
 
