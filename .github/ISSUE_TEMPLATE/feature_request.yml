@@ -1,0 +1,54 @@
+name: 💡 Feature Request
+description: Suggest a new feature for KubeCopilot
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Describe the problem and your proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem does this feature solve? Why is it needed?
+      placeholder: "I'm always frustrated when ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative approaches you've thought about?
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of KubeCopilot does this affect?
+      options:
+        - Operator / Controller
+        - Agent Server Container
+        - Web UI
+        - Helm Charts
+        - OpenShift Console Plugin
+        - CLI (proposed)
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Any mockups, diagrams, or references? How do similar projects handle this?

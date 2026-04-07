@@ -1,4 +1,4 @@
-# Contributing to kube-copilot-agent
+# Contributing to KubeCopilot
 
 Thank you for your interest in contributing! This document explains how to get the project running locally, the conventions we follow, and how to submit your changes.
 
@@ -21,7 +21,7 @@ Thank you for your interest in contributing! This document explains how to get t
 
 ## Code of Conduct
 
-Be respectful and constructive. We welcome contributors of all experience levels.
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behaviour to [conduct@kubecopilot.io](mailto:conduct@kubecopilot.io).
 
 ---
 
@@ -41,7 +41,7 @@ Be respectful and constructive. We welcome contributors of all experience levels
 ### Fork and clone
 
 ```sh
-git clone https://github.com/gfontana/kube-copilot-agent.git
+git clone https://github.com/giofontana/kube-copilot-agent.git
 cd kube-copilot-agent
 ```
 
@@ -212,6 +212,22 @@ fix(webhook): handle missing session_id in chunk payload
 docs: add agent backend contribution guide
 chore: rename docker targets to container in Makefile
 ```
+
+---
+
+## Developer Certificate of Origin (DCO)
+
+By contributing to KubeCopilot, you agree to the [Developer Certificate of Origin (DCO)](https://developercertificate.org/). This is a lightweight way to certify that you wrote or have the right to submit the code you are contributing.
+
+All commits must be signed off using `git commit -s`:
+
+```sh
+git commit -s -m "feat(controller): add retry logic"
+```
+
+This adds a `Signed-off-by` trailer to your commit message with your name and email.
+
+> **Tip**: Configure git to always sign off: `git config --global format.signOff true`
 
 ---
 

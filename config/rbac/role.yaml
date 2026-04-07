@@ -15,6 +15,16 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - persistentvolumeclaims
   - pods
   - secrets
@@ -36,6 +46,7 @@ rules:
   - kubecopilotchunks
   - kubecopilotmessages
   - kubecopilotsends
+  - kubecopilotsessions
   verbs:
   - create
   - delete
@@ -50,6 +61,7 @@ rules:
   - kubecopilotagents/finalizers
   - kubecopilotmessages/finalizers
   - kubecopilotsends/finalizers
+  - kubecopilotsessions/finalizers
   verbs:
   - update
 - apiGroups:
@@ -60,6 +72,7 @@ rules:
   - kubecopilotchunks/status
   - kubecopilotmessages/status
   - kubecopilotsends/status
+  - kubecopilotsessions/status
   verbs:
   - get
   - patch
@@ -80,6 +93,17 @@ rules:
   resources:
   - clusterrolebindings
   - clusterroles
+  - networking.k8s.io
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
   - rolebindings
   - roles
   verbs:

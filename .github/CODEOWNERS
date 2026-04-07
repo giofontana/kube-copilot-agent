@@ -1,0 +1,31 @@
+# KubeCopilot Code Owners
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything
+* @giofontana @samueltauil
+
+# Operator (Go)
+/api/ @giofontana @samueltauil
+/internal/ @giofontana @samueltauil
+/cmd/ @giofontana @samueltauil
+
+# Agent server
+/agent-server-container/ @giofontana @samueltauil
+
+# Web UI
+/web-ui/ @giofontana @samueltauil
+
+# Helm charts
+/helm/ @giofontana @samueltauil
+
+# OpenShift Console Plugin
+/openshift-console-plugin/ @giofontana @samueltauil
+
+# CI/CD and project config
+/.github/ @giofontana @samueltauil
+/Makefile @giofontana @samueltauil
+
+# Documentation
+/docs/ @giofontana @samueltauil
+README.md @giofontana @samueltauil
+CONTRIBUTING.md @giofontana @samueltauil
