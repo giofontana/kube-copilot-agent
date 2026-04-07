@@ -15,12 +15,12 @@ This document outlines the high-level roadmap for KubeCopilot. For detailed trac
 - ✅ BYOK (Bring Your Own Key) provider support
 - ✅ Web UI with settings panel
 - ✅ OpenShift Console Plugin
-- 🔄 ServiceAccount-based RBAC ([#4](https://github.com/kubecopilot/kubecopilot-core/issues/4))
-- 🔄 Multi-tenant session isolation ([#5](https://github.com/kubecopilot/kubecopilot-core/issues/5))
-- 🔄 Background notification system ([#13](https://github.com/kubecopilot/kubecopilot-core/issues/13))
-- 🔄 Helm chart standardization ([#11](https://github.com/kubecopilot/kubecopilot-core/issues/11))
-- 🔄 OpenShift Console Plugin fix ([#3](https://github.com/kubecopilot/kubecopilot-core/issues/3))
-- 🔄 Project Website — kubecopilot.io ([#6](https://github.com/kubecopilot/kubecopilot-core/issues/6))
+- ✅ ServiceAccount-based RBAC ([#4](https://github.com/kubecopilot/kubecopilot-core/issues/4))
+- ✅ Multi-tenant session isolation ([#5](https://github.com/kubecopilot/kubecopilot-core/issues/5))
+- ✅ Background notification system ([#13](https://github.com/kubecopilot/kubecopilot-core/issues/13))
+- ✅ Helm chart standardization ([#11](https://github.com/kubecopilot/kubecopilot-core/issues/11))
+- ✅ OpenShift Console Plugin fix ([#3](https://github.com/kubecopilot/kubecopilot-core/issues/3))
+- ✅ Project Website — kubecopilot.io ([#6](https://github.com/kubecopilot/kubecopilot-core/issues/6))
 
 ### Next — Ecosystem & Enterprise Readiness
 - 🔜 MCP Server Integration ([#15](https://github.com/kubecopilot/kubecopilot-core/issues/15)) — **Critical**
