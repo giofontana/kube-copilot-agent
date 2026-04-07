@@ -1,4 +1,4 @@
-# Contributing to kube-copilot-agent
+# Contributing to KubeCopilot
 
 Thank you for your interest in contributing! This document explains how to get the project running locally, the conventions we follow, and how to submit your changes.
 
@@ -21,7 +21,7 @@ Thank you for your interest in contributing! This document explains how to get t
 
 ## Code of Conduct
 
-Be respectful and constructive. We welcome contributors of all experience levels.
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behaviour to [conduct@kubecopilot.io](mailto:conduct@kubecopilot.io).
 
 ---
 
@@ -41,7 +41,7 @@ Be respectful and constructive. We welcome contributors of all experience levels
 ### Fork and clone
 
 ```sh
-git clone https://github.com/gfontana/kube-copilot-agent.git
+git clone https://github.com/giofontana/kube-copilot-agent.git
 cd kube-copilot-agent
 ```
 

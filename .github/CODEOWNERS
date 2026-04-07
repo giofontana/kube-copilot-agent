@@ -1,0 +1,28 @@
+# Default owners for everything
+* @giofontana
+
+# Operator (Go)
+/api/ @giofontana
+/internal/ @giofontana
+/cmd/ @giofontana
+
+# Agent server
+/agent-server-container/ @giofontana
+
+# Web UI
+/web-ui/ @giofontana
+
+# Helm charts
+/helm/ @giofontana
+
+# OpenShift Console Plugin
+/openshift-console-plugin/ @giofontana
+
+# CI/CD and project config
+/.github/ @giofontana
+/Makefile @giofontana
+
+# Documentation
+/docs/ @giofontana
+README.md @giofontana
+CONTRIBUTING.md @giofontana
