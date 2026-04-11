@@ -66,6 +66,12 @@ type KubeCopilotAgentSpec struct {
 	// This field is mutually exclusive with KubeconfigSecretRef.
 	// +optional
 	RBAC *AgentRBAC `json:"rbac,omitempty"`
+
+	// DelegateTo is a list of KubeCopilotAgent names that this agent can delegate
+	// tasks to. The operator configures the agent with a delegate_to_agent tool
+	// that creates KubeCopilotSend CRs targeting the specified agents.
+	// +optional
+	DelegateTo []string `json:"delegateTo,omitempty"`
 }
 
 // AgentRBAC defines the ServiceAccount and RBAC rules for an agent.
