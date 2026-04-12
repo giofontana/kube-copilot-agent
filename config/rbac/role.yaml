@@ -46,6 +46,7 @@ rules:
   - kubecopilotchunks
   - kubecopilotmessages
   - kubecopilotnotifications
+  - kubecopilotpolicies
   - kubecopilotsends
   - kubecopilotsessions
   verbs:
@@ -61,6 +62,7 @@ rules:
   resources:
   - kubecopilotagents/finalizers
   - kubecopilotmessages/finalizers
+  - kubecopilotpolicies/finalizers
   - kubecopilotsends/finalizers
   - kubecopilotsessions/finalizers
   verbs:
@@ -73,6 +75,7 @@ rules:
   - kubecopilotchunks/status
   - kubecopilotmessages/status
   - kubecopilotnotifications/status
+  - kubecopilotpolicies/status
   - kubecopilotsends/status
   - kubecopilotsessions/status
   verbs:

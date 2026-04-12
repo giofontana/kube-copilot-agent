@@ -110,6 +110,11 @@ type KubeCopilotSendSpec struct {
 	// SessionConfig holds optional per-session configuration overrides.
 	// +optional
 	SessionConfig *SessionConfig `json:"sessionConfig,omitempty"`
+
+	// Approved explicitly approves a send that was paused by a require-approval policy rule.
+	// Set this to true to proceed with dispatch after review.
+	// +optional
+	Approved bool `json:"approved,omitempty"`
 }
 
 // KubeCopilotSendStatus defines the observed state of KubeCopilotSend.

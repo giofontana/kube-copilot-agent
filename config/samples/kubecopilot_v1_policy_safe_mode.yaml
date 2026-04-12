@@ -1,0 +1,49 @@
+apiVersion: kubecopilot.io/v1
+kind: KubeCopilotPolicy
+metadata:
+  name: safe-mode
+  namespace: default
+spec:
+  # Empty agentRef applies to all agents in this namespace
+  rules:
+    # Deny destructive namespace operations
+    - name: block-namespace-deletion
+      type: deny
+      commandPatterns:
+        - "kubectl delete namespace *"
+        - "kubectl delete ns *"
+        - "oc delete project *"
+      message: "Namespace deletion is blocked by the safe-mode policy"
+
+    # Deny node-level operations
+    - name: block-node-operations
+      type: deny
+      commandPatterns:
+        - "kubectl cordon *"
+        - "kubectl drain *"
+        - "kubectl delete node *"
+      message: "Node operations require direct cluster access"
+
+    # Deny PV deletion
+    - name: block-pv-deletion
+      type: deny
+      commandPatterns:
+        - "kubectl delete pv *"
+        - "kubectl delete persistentvolume *"
+      message: "PersistentVolume deletion is blocked"
+
+    # Require approval for scaling operations
+    - name: approve-scaling
+      type: require-approval
+      commandPatterns:
+        - "kubectl scale *"
+        - "kubectl autoscale *"
+      message: "Scaling operations require explicit approval"
+
+    # Require approval for any --force flag
+    - name: approve-force-operations
+      type: require-approval
+      commandPatterns:
+        - "* --force *"
+        - "* --force"
+      message: "Force operations require explicit approval"
