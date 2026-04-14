@@ -364,7 +364,10 @@ func (r *KubeCopilotAgentReconciler) ensurePod(ctx context.Context, agent *agent
 	// Pass delegation targets as a JSON-encoded env var so the agent runtime
 	// knows which agents it can delegate to.
 	if len(agent.Spec.DelegateTo) > 0 {
-		delegateJSON, _ := json.Marshal(agent.Spec.DelegateTo)
+		delegateJSON, err := json.Marshal(agent.Spec.DelegateTo)
+		if err != nil {
+			return fmt.Errorf("marshal delegate targets: %w", err)
+		}
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "DELEGATE_TO_AGENTS",
 			Value: string(delegateJSON),
