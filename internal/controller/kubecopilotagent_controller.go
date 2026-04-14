@@ -359,7 +359,19 @@ func (r *KubeCopilotAgentReconciler) ensurePod(ctx context.Context, agent *agent
 			Name:  "KUBECONFIG",
 			Value: "/copilot/.kube/config",
 		})
-	} else if agent.Spec.RBAC != nil {
+	}
+
+	// Pass delegation targets as a JSON-encoded env var so the agent runtime
+	// knows which agents it can delegate to.
+	if len(agent.Spec.DelegateTo) > 0 {
+		delegateJSON, _ := json.Marshal(agent.Spec.DelegateTo)
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "DELEGATE_TO_AGENTS",
+			Value: string(delegateJSON),
+		})
+	}
+
+	if agent.Spec.RBAC != nil && agent.Spec.KubeconfigSecretRef == nil {
 		// When RBAC is configured the operator generates the kubeconfig
 		// automatically from the ServiceAccount token.
 		kubeconfigSecretName := agent.Name + "-kubeconfig"
