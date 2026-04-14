@@ -44,6 +44,7 @@ type KubeCopilotSendReconciler struct {
 // +kubebuilder:rbac:groups=kubecopilot.io,resources=kubecopilotsends/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubecopilot.io,resources=kubecopilotsends/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kubecopilot.io,resources=kubecopilotresponses,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=kubecopilot.io,resources=kubecopilotpolicies,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 type providerConfig struct {
@@ -94,7 +95,12 @@ func (r *KubeCopilotSendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	// Idempotent: skip if already terminal
-	if send.Status.Phase == phaseDone || send.Status.Phase == phaseError {
+	if send.Status.Phase == phaseDone || send.Status.Phase == phaseError || send.Status.Phase == phaseDenied {
+		return ctrl.Result{}, nil
+	}
+
+	// If previously paused for approval, check if now approved
+	if send.Status.Phase == phasePendingApproval && !send.Spec.Approved {
 		return ctrl.Result{}, nil
 	}
 
@@ -107,8 +113,43 @@ func (r *KubeCopilotSendReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if agent.Status.Phase != phaseRunning {
-		log.Info("agent not running, requeueing", "agentPhase", agent.Status.Phase)
+		log.Info("Agent not running, requeueing", "agentPhase", agent.Status.Phase)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// Evaluate policies before dispatch (pre-dispatch screening).
+	// Deny rules always take precedence over require-approval rules.
+	evalResult, err := EvaluatePolicies(ctx, r.Client, send.Namespace, send.Spec.AgentRef, send.Spec.Message)
+	if err != nil {
+		log.Error(err, "Failed to evaluate policies")
+		send.Status.Phase = phaseError
+		send.Status.ErrorMessage = fmt.Sprintf("policy evaluation failed: %v", err)
+		return ctrl.Result{}, r.Status().Update(ctx, send)
+	}
+
+	switch evalResult.Decision {
+	case PolicyDecisionDeny:
+		log.Info("Send denied by policy", "policy", evalResult.PolicyName, "rule", evalResult.RuleName)
+		send.Status.Phase = phaseDenied
+		msg := fmt.Sprintf("denied by policy %q rule %q", evalResult.PolicyName, evalResult.RuleName)
+		if evalResult.Message != "" {
+			msg += ": " + evalResult.Message
+		}
+		send.Status.ErrorMessage = msg
+		return ctrl.Result{}, r.Status().Update(ctx, send)
+
+	case PolicyDecisionRequireApproval:
+		if !send.Spec.Approved {
+			log.Info("Send requires approval", "policy", evalResult.PolicyName, "rule", evalResult.RuleName)
+			send.Status.Phase = phasePendingApproval
+			msg := fmt.Sprintf("requires approval per policy %q rule %q", evalResult.PolicyName, evalResult.RuleName)
+			if evalResult.Message != "" {
+				msg += ": " + evalResult.Message
+			}
+			send.Status.ErrorMessage = msg
+			return ctrl.Result{}, r.Status().Update(ctx, send)
+		}
+		log.Info("Send approved, proceeding", "policy", evalResult.PolicyName, "rule", evalResult.RuleName)
 	}
 
 	url := fmt.Sprintf("http://%s.%s.svc.cluster.local:8080/asyncchat", agent.Status.ServiceName, send.Namespace)

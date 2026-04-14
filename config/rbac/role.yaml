@@ -47,6 +47,7 @@ rules:
   - kubecopilotchunks
   - kubecopilotmessages
   - kubecopilotnotifications
+  - kubecopilotpolicies
   - kubecopilotsends
   - kubecopilotsessions
   - kubecopilottoolservers
@@ -64,6 +65,7 @@ rules:
   - kubecopilotagents/finalizers
   - kubecopilotagentteams/finalizers
   - kubecopilotmessages/finalizers
+  - kubecopilotpolicies/finalizers
   - kubecopilotsends/finalizers
   - kubecopilotsessions/finalizers
   - kubecopilottoolservers/finalizers
@@ -78,6 +80,7 @@ rules:
   - kubecopilotchunks/status
   - kubecopilotmessages/status
   - kubecopilotnotifications/status
+  - kubecopilotpolicies/status
   - kubecopilotsends/status
   - kubecopilotsessions/status
   - kubecopilottoolservers/status

@@ -53,6 +53,11 @@ spec:
                 description: AgentRef is the name of the KubeCopilotAgent in the same
                   namespace.
                 type: string
+              approved:
+                description: |-
+                  Approved explicitly approves a send that was paused by a require-approval policy rule.
+                  Set this to true to proceed with dispatch after review.
+                type: boolean
               message:
                 description: Message is the prompt to send to the copilot agent asynchronously.
                 type: string
