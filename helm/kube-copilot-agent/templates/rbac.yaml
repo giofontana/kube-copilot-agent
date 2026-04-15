@@ -38,6 +38,7 @@ rules:
   - kubecopilotchunks
   - kubecopilotmessages
   - kubecopilotnotifications
+  - kubecopilotpolicies
   - kubecopilotsends
   - kubecopilotsessions
   verbs: [create, delete, get, list, patch, update, watch]
@@ -45,6 +46,7 @@ rules:
   resources:
   - kubecopilotagents/finalizers
   - kubecopilotmessages/finalizers
+  - kubecopilotpolicies/finalizers
   - kubecopilotsends/finalizers
   - kubecopilotsessions/finalizers
   verbs: [update]
@@ -55,6 +57,7 @@ rules:
   - kubecopilotchunks/status
   - kubecopilotmessages/status
   - kubecopilotnotifications/status
+  - kubecopilotpolicies/status
   - kubecopilotsends/status
   - kubecopilotsessions/status
   verbs: [get, patch, update]
