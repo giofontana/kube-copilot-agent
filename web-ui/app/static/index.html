@@ -26,6 +26,17 @@
       flex-shrink: 0;
     }
     .app-header h1 { margin: 0; font-size: 1.1rem; }
+    .app-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .app-brand-logo {
+      width: 2.5rem;
+      height: 2.5rem;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
     .session-badge {
       font-size: 0.7rem; font-family: monospace;
       color: var(--pico-muted-color);
@@ -438,7 +449,10 @@
 
 <!-- Header -->
 <div class="app-header">
-  <h1>🤖 KubeCopilot</h1>
+  <h1 class="app-brand">
+    <img class="app-brand-logo" src="/assets/kubecopilot-logo.png" alt="KubeCopilot logo" />
+    <span>KubeCopilot</span>
+  </h1>
   <div style="display:flex;align-items:center;gap:0.6rem">
     <span class="task-indicator" id="taskIndicator" title="Background tasks running">
       <span class="dot"></span> <span id="taskCount">0</span> tasks
