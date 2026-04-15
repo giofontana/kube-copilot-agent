@@ -388,39 +388,40 @@ async def _run_sdk_streaming(
 
     session.on(on_event)
 
-    # Send the message
-    await session.send(message)
+    try:
+        # Send the message
+        await session.send(message)
 
-    # Wait for completion (no timeout — complex tool-use chains can take arbitrarily long)
-    await done.wait()
+        # Wait for completion (no timeout — complex tool-use chains can take arbitrarily long)
+        await done.wait()
+
+        if cancelled:
+            cancelled_msg = "⛔ Request cancelled by user."
+            if chunk_url and send_ref:
+                await _post_chunk(
+                    chunk_url, send_ref, resolved_session_id or session_id,
+                    agent_ref, namespace, sequence, "error", cancelled_msg,
+                )
+            return cancelled_msg, resolved_session_id or session_id or ""
+
+        # Disconnect session (cleanup) — don't delete CLI state
+        await session.disconnect()
+
+        if not response_text:
+            response_text = "No response captured"
+
+        # Flush any remaining thinking text that didn't end with punctuation
+        if _thinking_buffer.strip() and chunk_url and send_ref:
+            await _post_chunk(
+                chunk_url, send_ref, resolved_session_id or session_id,
+                agent_ref, namespace, sequence, "thinking",
+                f"🤔 {_thinking_buffer.strip()[:300]}",
+            )
+
+        return response_text, resolved_session_id or session_id or ""
     finally:
         if queue_id:
             _active_sessions.pop(queue_id, None)
-
-    if cancelled:
-        cancelled_msg = "⛔ Request cancelled by user."
-        if chunk_url and send_ref:
-            await _post_chunk(
-                chunk_url, send_ref, resolved_session_id or session_id,
-                agent_ref, namespace, sequence, "error", cancelled_msg,
-            )
-        return cancelled_msg, resolved_session_id or session_id or ""
-
-    # Disconnect session (cleanup) — don't delete CLI state
-    await session.disconnect()
-
-    if not response_text:
-        response_text = "No response captured"
-
-    # Flush any remaining thinking text that didn't end with punctuation
-    if _thinking_buffer.strip() and chunk_url and send_ref:
-        await _post_chunk(
-            chunk_url, send_ref, resolved_session_id or session_id,
-            agent_ref, namespace, sequence, "thinking",
-            f"🤔 {_thinking_buffer.strip()[:300]}",
-        )
-
-    return response_text, resolved_session_id or session_id or ""
 
 
 # ── Async queue processing ───────────────────────────────────────────────────
