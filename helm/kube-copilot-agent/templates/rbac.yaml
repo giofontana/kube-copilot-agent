@@ -34,6 +34,7 @@ rules:
 - apiGroups: [kubecopilot.io]
   resources:
   - kubecopilotagents
+  - kubecopilotagentteams
   - kubecopilotcancels
   - kubecopilotchunks
   - kubecopilotmessages
@@ -41,18 +42,22 @@ rules:
   - kubecopilotpolicies
   - kubecopilotsends
   - kubecopilotsessions
+  - kubecopilottoolservers
   verbs: [create, delete, get, list, patch, update, watch]
 - apiGroups: [kubecopilot.io]
   resources:
   - kubecopilotagents/finalizers
+  - kubecopilotagentteams/finalizers
   - kubecopilotmessages/finalizers
   - kubecopilotpolicies/finalizers
   - kubecopilotsends/finalizers
   - kubecopilotsessions/finalizers
+  - kubecopilottoolservers/finalizers
   verbs: [update]
 - apiGroups: [kubecopilot.io]
   resources:
   - kubecopilotagents/status
+  - kubecopilotagentteams/status
   - kubecopilotcancels/status
   - kubecopilotchunks/status
   - kubecopilotmessages/status
@@ -60,6 +65,7 @@ rules:
   - kubecopilotpolicies/status
   - kubecopilotsends/status
   - kubecopilotsessions/status
+  - kubecopilottoolservers/status
   verbs: [get, patch, update]
 - apiGroups: [kubecopilot.io]
   resources: [kubecopilotresponses]
