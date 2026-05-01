@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,13 +45,18 @@ var log = logf.Log.WithName("webhook-server")
 
 // ResponsePayload is the JSON body the agent POSTs when a queued response is ready.
 type ResponsePayload struct {
-	QueueID   string `json:"queue_id"`
-	SessionID string `json:"session_id"`
-	Prompt    string `json:"prompt"`
-	Response  string `json:"response"`
-	SendRef   string `json:"send_ref,omitempty"`
-	Namespace string `json:"namespace,omitempty"`
-	AgentRef  string `json:"agent_ref,omitempty"`
+	QueueID      string       `json:"queue_id"`
+	SessionID    string       `json:"session_id"`
+	Prompt       string       `json:"prompt"`
+	Response     string       `json:"response"`
+	SendRef      string       `json:"send_ref,omitempty"`
+	Namespace    string       `json:"namespace,omitempty"`
+	AgentRef     string       `json:"agent_ref,omitempty"`
+	InputTokens  int64        `json:"input_tokens,omitempty"`
+	OutputTokens int64        `json:"output_tokens,omitempty"`
+	TotalTokens  int64        `json:"total_tokens,omitempty"`
+	Cost         string       `json:"estimated_cost,omitempty"`
+	Model        string       `json:"model,omitempty"`
 }
 
 // Server is a lightweight HTTP server that listens for agent webhook calls.
@@ -138,6 +144,21 @@ func (s *Server) handleResponse(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// Populate usage if any token data was provided.
+	if payload.InputTokens > 0 || payload.OutputTokens > 0 || payload.TotalTokens > 0 {
+		total := payload.TotalTokens
+		if total == 0 {
+			total = payload.InputTokens + payload.OutputTokens
+		}
+		resp.Spec.Usage = &agentv1.UsageSpec{
+			InputTokens:   payload.InputTokens,
+			OutputTokens:  payload.OutputTokens,
+			TotalTokens:   total,
+			EstimatedCost: payload.Cost,
+			Model:         payload.Model,
+		}
+	}
+
 	ctx := context.Background()
 	if err := s.k8sClient.Create(ctx, resp); err != nil {
 		log.Error(err, "failed to create KubeCopilotResponse", "name", name, "namespace", namespace)
@@ -148,6 +169,28 @@ func (s *Server) handleResponse(w http.ResponseWriter, r *http.Request) {
 	// Stamp the createdAt status
 	resp.Status.CreatedAt = &now
 	_ = s.k8sClient.Status().Update(ctx, resp)
+
+	// Record Prometheus metrics.
+	model := payload.Model
+	if model == "" {
+		model = "unknown"
+	}
+	agent := payload.AgentRef
+	if agent == "" {
+		agent = "unknown"
+	}
+	if payload.InputTokens > 0 {
+		tokensTotal.WithLabelValues(agent, model, "input").Add(float64(payload.InputTokens))
+	}
+	if payload.OutputTokens > 0 {
+		tokensTotal.WithLabelValues(agent, model, "output").Add(float64(payload.OutputTokens))
+	}
+	if payload.Cost != "" {
+		if cost, err := strconv.ParseFloat(payload.Cost, 64); err == nil && cost > 0 {
+			estimatedCostTotal.WithLabelValues(agent, model).Add(cost)
+		}
+	}
+	sessionsTotal.WithLabelValues(agent).Inc()
 
 	log.Info("Created KubeCopilotResponse", "name", name, "namespace", namespace, "sendRef", payload.SendRef)
 	w.WriteHeader(http.StatusCreated)

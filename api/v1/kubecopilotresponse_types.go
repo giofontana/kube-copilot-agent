@@ -20,6 +20,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// UsageSpec captures token consumption and estimated cost for a single LLM response.
+type UsageSpec struct {
+	// InputTokens is the number of tokens in the prompt sent to the model.
+	// +optional
+	InputTokens int64 `json:"inputTokens,omitempty"`
+
+	// OutputTokens is the number of tokens in the model's reply.
+	// +optional
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+
+	// TotalTokens is the sum of input and output tokens.
+	// +optional
+	TotalTokens int64 `json:"totalTokens,omitempty"`
+
+	// EstimatedCost is the estimated USD cost for this response based on model pricing.
+	// Stored as a string to preserve decimal precision (e.g. "0.002345").
+	// +optional
+	EstimatedCost string `json:"estimatedCost,omitempty"`
+
+	// Model is the model identifier used for this response (e.g. "gpt-4o").
+	// +optional
+	Model string `json:"model,omitempty"`
+}
+
 // KubeCopilotResponseSpec defines the content of a KubeCopilotResponse.
 // This object is immutable once created by the operator webhook.
 type KubeCopilotResponseSpec struct {
@@ -42,6 +66,10 @@ type KubeCopilotResponseSpec struct {
 	// SendRef is the name of the KubeCopilotSend that initiated this request.
 	// +optional
 	SendRef string `json:"sendRef,omitempty"`
+
+	// Usage contains token consumption and estimated cost for this response.
+	// +optional
+	Usage *UsageSpec `json:"usage,omitempty"`
 }
 
 // KubeCopilotResponseStatus defines the observed state of KubeCopilotResponse.

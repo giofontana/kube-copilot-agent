@@ -322,7 +322,125 @@ def delete_notifications_for_session(session_id: str, agent_ref: str, namespace:
     return deleted
 
 
-def list_running_sessions(agent_ref: str, namespace: str) -> list[dict]:
+def get_usage_summary(agent_ref: str, namespace: str) -> dict:
+    """Return aggregated token usage and cost across all sessions for an agent.
+
+    Queries all KubeCopilotResponse objects for the agent and sums token counts
+    and estimated costs from the spec.usage field.
+    """
+    label_selector = f"kubecopilot.io/agent-ref={agent_ref}"
+    result = _api.list_namespaced_custom_object(
+        GROUP, VERSION, namespace, PLURAL_RESPONSES,
+        label_selector=label_selector,
+    )
+    items = result.get("items", [])
+
+    total_input = 0
+    total_output = 0
+    total_tokens = 0
+    total_cost = 0.0
+    sessions: set[str] = set()
+    per_model: dict[str, dict] = {}
+
+    for item in items:
+        spec = item.get("spec", {})
+        usage = spec.get("usage", {})
+        if not usage:
+            continue
+
+        input_t = usage.get("inputTokens", 0) or 0
+        output_t = usage.get("outputTokens", 0) or 0
+        total_t = usage.get("totalTokens", 0) or (input_t + output_t)
+        cost_str = usage.get("estimatedCost", "") or ""
+        model = usage.get("model", "unknown") or "unknown"
+
+        total_input += input_t
+        total_output += output_t
+        total_tokens += total_t
+
+        try:
+            cost_val = float(cost_str) if cost_str else 0.0
+        except (ValueError, TypeError):
+            cost_val = 0.0
+        total_cost += cost_val
+
+        sid = spec.get("sessionID") or ""
+        if sid:
+            sessions.add(sid)
+
+        if model not in per_model:
+            per_model[model] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "estimated_cost": 0.0, "requests": 0}
+        per_model[model]["input_tokens"] += input_t
+        per_model[model]["output_tokens"] += output_t
+        per_model[model]["total_tokens"] += total_t
+        per_model[model]["estimated_cost"] += cost_val
+        per_model[model]["requests"] += 1
+
+    return {
+        "agent_ref": agent_ref,
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "total_tokens": total_tokens,
+        "total_estimated_cost": round(total_cost, 6),
+        "total_sessions": len(sessions),
+        "total_requests": len(items),
+        "per_model": {
+            m: {
+                **v,
+                "estimated_cost": round(v["estimated_cost"], 6),
+            }
+            for m, v in per_model.items()
+        },
+    }
+
+
+def list_session_usage(agent_ref: str, namespace: str) -> list[dict]:
+    """Return per-session token usage for an agent, ordered newest first."""
+    label_selector = f"kubecopilot.io/agent-ref={agent_ref}"
+    result = _api.list_namespaced_custom_object(
+        GROUP, VERSION, namespace, PLURAL_RESPONSES,
+        label_selector=label_selector,
+    )
+    items = sorted(
+        result.get("items", []),
+        key=lambda r: r["metadata"].get("creationTimestamp", ""),
+        reverse=True,
+    )
+
+    seen_sessions: dict[str, dict] = {}
+    for item in items:
+        spec = item.get("spec", {})
+        usage = spec.get("usage", {}) or {}
+        sid = spec.get("sessionID") or ""
+        if not sid:
+            continue
+        if sid not in seen_sessions:
+            seen_sessions[sid] = {
+                "session_id": sid,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "estimated_cost": 0.0,
+                "requests": 0,
+                "model": usage.get("model", ""),
+                "last_activity": item["metadata"].get("creationTimestamp", ""),
+            }
+        entry = seen_sessions[sid]
+        entry["input_tokens"] += usage.get("inputTokens", 0) or 0
+        entry["output_tokens"] += usage.get("outputTokens", 0) or 0
+        entry["total_tokens"] += usage.get("totalTokens", 0) or 0
+        cost_str = usage.get("estimatedCost", "") or ""
+        try:
+            entry["estimated_cost"] += float(cost_str) if cost_str else 0.0
+        except (ValueError, TypeError):
+            pass
+        entry["requests"] += 1
+
+    sessions = list(seen_sessions.values())
+    for s in sessions:
+        s["estimated_cost"] = round(s["estimated_cost"], 6)
+    sessions.sort(key=lambda s: s["last_activity"], reverse=True)
+    return sessions
     """
     Return KubeCopilotSend objects that have no corresponding KubeCopilotResponse yet.
     These represent in-progress requests.

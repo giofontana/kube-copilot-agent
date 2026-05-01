@@ -460,6 +460,7 @@
       <button class="settings-tab" onclick="switchSettingsTab(this,'tab-instructions')">Instructions</button>
       <button class="settings-tab" onclick="switchSettingsTab(this,'tab-skills')">Skills</button>
       <button class="settings-tab" onclick="switchSettingsTab(this,'tab-agents')">Agents</button>
+      <button class="settings-tab" onclick="switchSettingsTab(this,'tab-usage');loadUsageDashboard()">Usage</button>
     </div>
     <div class="settings-body">
       <!-- Model / BYOK consolidated tab -->
@@ -533,6 +534,20 @@
           <button class="secondary" onclick="loadCustomAgents()">Reload</button>
         </div>
         <div class="settings-toast" id="agentsToast"></div>
+      </div>
+      <!-- Usage / Cost Tracking tab -->
+      <div class="settings-section" id="tab-usage">
+        <div id="usageSummaryPanel" style="margin-bottom:1rem">
+          <p style="color:var(--pico-muted-color);font-size:0.82rem">Loading usage data…</p>
+        </div>
+        <div style="margin-bottom:0.5rem">
+          <span style="font-size:0.75rem;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em">Per-session breakdown</span>
+        </div>
+        <div id="usageSessionsTable" style="overflow-x:auto"></div>
+        <div class="settings-actions">
+          <button class="secondary" onclick="loadUsageDashboard()">↻ Refresh</button>
+        </div>
+        <div class="settings-toast" id="usageToast"></div>
       </div>
     </div>
   </div>
@@ -1663,6 +1678,115 @@ async function pollBackgroundTasks() {
 
 // Poll tasks every 15s
 setInterval(pollBackgroundTasks, 15000);
+
+// =============================================================
+// Usage / Cost Tracking dashboard
+// =============================================================
+async function loadUsageDashboard() {
+  if (!currentAgent) return;
+  const summaryEl = document.getElementById('usageSummaryPanel');
+  const tableEl   = document.getElementById('usageSessionsTable');
+  if (!summaryEl || !tableEl) return;
+
+  summaryEl.innerHTML = '<p style="color:var(--pico-muted-color);font-size:0.82rem">Loading…</p>';
+  tableEl.innerHTML   = '';
+
+  try {
+    const [summary, sessions] = await Promise.all([
+      apiFetch(`/usage?agent_ref=${enc(currentAgent)}`).catch(() => null),
+      apiFetch(`/usage/sessions?agent_ref=${enc(currentAgent)}`).catch(() => []),
+    ]);
+
+    if (!summary) {
+      summaryEl.innerHTML = '<p style="color:var(--pico-muted-color);font-size:0.82rem">No usage data available.</p>';
+      return;
+    }
+
+    const fmtCost  = v => v > 0 ? `$${Number(v).toFixed(4)}` : '—';
+    const fmtNum   = v => Number(v || 0).toLocaleString();
+
+    // Summary cards
+    summaryEl.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0.5rem;margin-bottom:0.75rem">
+        ${_usageCard('Total Tokens', fmtNum(summary.total_tokens))}
+        ${_usageCard('Input Tokens', fmtNum(summary.total_input_tokens))}
+        ${_usageCard('Output Tokens', fmtNum(summary.total_output_tokens))}
+        ${_usageCard('Est. Cost', fmtCost(summary.total_estimated_cost))}
+        ${_usageCard('Sessions', fmtNum(summary.total_sessions))}
+        ${_usageCard('Requests', fmtNum(summary.total_requests))}
+      </div>
+      ${_usagePerModelTable(summary.per_model)}`;
+
+    // Per-session table
+    if (!sessions.length) {
+      tableEl.innerHTML = '<p style="font-size:0.8rem;color:var(--pico-muted-color)">No per-session usage data yet.</p>';
+      return;
+    }
+
+    const rows = sessions.map(s => `
+      <tr>
+        <td style="font-family:monospace;font-size:0.72rem">${esc(s.session_id.substring(0, 20))}…</td>
+        <td style="text-align:right">${fmtNum(s.total_tokens)}</td>
+        <td style="text-align:right">${fmtNum(s.input_tokens)}</td>
+        <td style="text-align:right">${fmtNum(s.output_tokens)}</td>
+        <td style="text-align:right">${fmtCost(s.estimated_cost)}</td>
+        <td style="text-align:right">${fmtNum(s.requests)}</td>
+        <td style="font-size:0.72rem;color:var(--pico-muted-color)">${esc(s.model || '—')}</td>
+      </tr>`).join('');
+    tableEl.innerHTML = `
+      <table style="width:100%;font-size:0.78rem;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left">Session</th>
+          <th style="text-align:right">Total Tokens</th>
+          <th style="text-align:right">Input</th>
+          <th style="text-align:right">Output</th>
+          <th style="text-align:right">Est. Cost</th>
+          <th style="text-align:right">Requests</th>
+          <th style="text-align:left">Model</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (e) {
+    summaryEl.innerHTML = `<p style="color:#f07178;font-size:0.82rem">Failed to load usage: ${esc(e.message)}</p>`;
+  }
+}
+
+function _usageCard(label, value) {
+  return `<div style="background:var(--pico-secondary-background);border-radius:0.4rem;padding:0.5rem 0.75rem;text-align:center">
+    <div style="font-size:0.68rem;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.04em">${esc(label)}</div>
+    <div style="font-size:1.1rem;font-weight:600;margin-top:0.15rem">${esc(value)}</div>
+  </div>`;
+}
+
+function _usagePerModelTable(perModel) {
+  if (!perModel || !Object.keys(perModel).length) return '';
+  const fmtCost = v => v > 0 ? `$${Number(v).toFixed(4)}` : '—';
+  const fmtNum  = v => Number(v || 0).toLocaleString();
+  const rows = Object.entries(perModel).map(([model, d]) => `
+    <tr>
+      <td>${esc(model)}</td>
+      <td style="text-align:right">${fmtNum(d.total_tokens)}</td>
+      <td style="text-align:right">${fmtNum(d.input_tokens)}</td>
+      <td style="text-align:right">${fmtNum(d.output_tokens)}</td>
+      <td style="text-align:right">${fmtCost(d.estimated_cost)}</td>
+      <td style="text-align:right">${fmtNum(d.requests)}</td>
+    </tr>`).join('');
+  return `
+    <div style="margin-top:0.5rem">
+      <div style="font-size:0.72rem;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:0.3rem">By Model</div>
+      <table style="width:100%;font-size:0.78rem;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left">Model</th>
+          <th style="text-align:right">Total Tokens</th>
+          <th style="text-align:right">Input</th>
+          <th style="text-align:right">Output</th>
+          <th style="text-align:right">Est. Cost</th>
+          <th style="text-align:right">Requests</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
 
 // =============================================================
 init();
