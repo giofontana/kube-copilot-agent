@@ -32,8 +32,127 @@ import (
 func newTestServer() *Server {
 	scheme := runtime.NewScheme()
 	_ = agentv1.AddToScheme(scheme)
-	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&agentv1.KubeCopilotNotification{}).Build()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&agentv1.KubeCopilotNotification{}, &agentv1.KubeCopilotResponse{}).Build()
 	return New(fakeClient, ":0")
+}
+
+// ── Response / Usage handler tests ──────────────────────────────────────────
+
+func TestHandleResponse_ValidPayload(t *testing.T) {
+	s := newTestServer()
+
+	payload := ResponsePayload{
+		QueueID:   "abc12345",
+		SessionID: "sess-001",
+		Prompt:    "Hello",
+		Response:  "World",
+		SendRef:   "send-aaa",
+		Namespace: defaultNamespace,
+		AgentRef:  "test-agent",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/response", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.handleResponse(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp["namespace"] != defaultNamespace {
+		t.Errorf("expected namespace %q, got %q", defaultNamespace, resp["namespace"])
+	}
+}
+
+func TestHandleResponse_WithUsage(t *testing.T) {
+	s := newTestServer()
+
+	payload := ResponsePayload{
+		QueueID:      "def67890",
+		SessionID:    "sess-002",
+		Prompt:       "Count tokens",
+		Response:     "Done",
+		SendRef:      "send-bbb",
+		Namespace:    defaultNamespace,
+		AgentRef:     "test-agent",
+		InputTokens:  150,
+		OutputTokens: 50,
+		TotalTokens:  200,
+		Cost:         "0.003000",
+		Model:        "gpt-4o",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/response", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.handleResponse(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleResponse_DefaultNamespace(t *testing.T) {
+	s := newTestServer()
+
+	payload := ResponsePayload{
+		QueueID:  "ghi11111",
+		Prompt:   "test",
+		Response: "ok",
+		AgentRef: "agent-x",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest(http.MethodPost, "/response", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	s.handleResponse(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected status 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["namespace"] != defaultNamespace {
+		t.Errorf("expected default namespace, got %q", resp["namespace"])
+	}
+}
+
+func TestHandleResponse_MethodNotAllowed(t *testing.T) {
+	s := newTestServer()
+
+	req := httptest.NewRequest(http.MethodGet, "/response", nil)
+	w := httptest.NewRecorder()
+
+	s.handleResponse(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleResponse_InvalidJSON(t *testing.T) {
+	s := newTestServer()
+
+	req := httptest.NewRequest(http.MethodPost, "/response", bytes.NewReader([]byte("not json")))
+	w := httptest.NewRecorder()
+
+	s.handleResponse(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for bad JSON, got %d", w.Code)
+	}
 }
 
 func TestHandleNotification_ValidPayload(t *testing.T) {

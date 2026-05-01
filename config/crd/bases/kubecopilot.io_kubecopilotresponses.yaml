@@ -70,6 +70,34 @@ spec:
                 description: SessionID is the conversation session this response belongs
                   to.
                 type: string
+              usage:
+                description: Usage contains token consumption and estimated cost for
+                  this response.
+                properties:
+                  estimatedCost:
+                    description: |-
+                      EstimatedCost is the estimated USD cost for this response based on model pricing.
+                      Stored as a string to preserve decimal precision (e.g. "0.002345").
+                    type: string
+                  inputTokens:
+                    description: InputTokens is the number of tokens in the prompt
+                      sent to the model.
+                    format: int64
+                    type: integer
+                  model:
+                    description: Model is the model identifier used for this response
+                      (e.g. "gpt-4o").
+                    type: string
+                  outputTokens:
+                    description: OutputTokens is the number of tokens in the model's
+                      reply.
+                    format: int64
+                    type: integer
+                  totalTokens:
+                    description: TotalTokens is the sum of input and output tokens.
+                    format: int64
+                    type: integer
+                type: object
             required:
             - agentRef
             - prompt

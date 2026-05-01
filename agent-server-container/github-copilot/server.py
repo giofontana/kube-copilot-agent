@@ -220,10 +220,11 @@ async def _run_sdk_streaming(
     agent_ref: str | None,
     queue_id: str | None,
     session_config: SessionConfig | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, dict]:
     """
     Run a copilot interaction via the SDK, streaming chunks to the webhook.
-    Returns (response_text, session_id).
+    Returns (response_text, session_id, usage) where usage is a dict with
+    input_tokens, output_tokens, total_tokens, model keys.
     """
     client = await _get_client()
     chunk_url = WEBHOOK_URL.replace("/response", "/chunk") if WEBHOOK_URL else ""
@@ -231,6 +232,8 @@ async def _run_sdk_streaming(
     response_text = ""
     resolved_session_id = session_id or ""
     _thinking_buffer = ""  # accumulates reasoning deltas until a sentence boundary
+    # Token usage tracking
+    usage: dict = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "model": ""}
 
     if chunk_url and send_ref:
         await _post_chunk(
@@ -240,6 +243,14 @@ async def _run_sdk_streaming(
         sequence += 1
 
     opts = await _build_session_opts(session_config)
+
+    # Capture the model name for usage reporting
+    if session_config and session_config.model:
+        usage["model"] = session_config.model
+    elif session_config and session_config.provider and session_config.provider.model_name:
+        usage["model"] = session_config.provider.model_name
+    elif opts.get("model"):
+        usage["model"] = opts["model"]
 
     # Create or resume session
     if session_id:
@@ -262,7 +273,32 @@ async def _run_sdk_streaming(
         etype = event.type.value if hasattr(event.type, "value") else str(event.type)
         data = event.data if hasattr(event, "data") else None
 
-        # Session ID extraction
+        # Token usage — the SDK may emit usage data on various events (e.g. "session.usage",
+        # "conversation.turn_complete", or via "session.idle"). Extract from any event that
+        # carries a usage attribute; this is intentionally independent of the event-type
+        # dispatch chain below so usage is captured regardless of which event delivers it.
+        if data is not None:
+            event_usage = getattr(data, "usage", None)
+            if event_usage is not None:
+                usage["input_tokens"] = (
+                    getattr(event_usage, "input_tokens", 0)
+                    or getattr(event_usage, "prompt_tokens", 0)
+                    or usage["input_tokens"]
+                )
+                usage["output_tokens"] = (
+                    getattr(event_usage, "output_tokens", 0)
+                    or getattr(event_usage, "completion_tokens", 0)
+                    or usage["output_tokens"]
+                )
+                total = getattr(event_usage, "total_tokens", 0) or usage.get("total_tokens", 0)
+                if total == 0:
+                    total = usage["input_tokens"] + usage["output_tokens"]
+                usage["total_tokens"] = total
+                model_from_event = getattr(event_usage, "model", "") or ""
+                if model_from_event and not usage["model"]:
+                    usage["model"] = model_from_event
+
+        # Event-type dispatch — mutually exclusive handling for each SDK event type.
         if etype == "session.created" and data and hasattr(data, "session_id"):
             resolved_session_id = data.session_id or resolved_session_id
 
@@ -404,7 +440,7 @@ async def _run_sdk_streaming(
                 chunk_url, send_ref, resolved_session_id or session_id,
                 agent_ref, namespace, sequence, "error", cancelled_msg,
             )
-        return cancelled_msg, resolved_session_id or session_id or ""
+        return cancelled_msg, resolved_session_id or session_id or "", usage
 
     # Disconnect session (cleanup) — don't delete CLI state
     await session.disconnect()
@@ -420,7 +456,7 @@ async def _run_sdk_streaming(
             f"🤔 {_thinking_buffer.strip()[:300]}",
         )
 
-    return response_text, resolved_session_id or session_id or ""
+    return response_text, resolved_session_id or session_id or "", usage
 
 
 # ── Async queue processing ───────────────────────────────────────────────────
@@ -440,7 +476,7 @@ async def _handle_async_item(item: dict):
     queue_id = item["queue_id"]
     async with _concurrency:
         try:
-            response_text, resolved_session_id = await _run_sdk_streaming(
+            response_text, resolved_session_id, usage = await _run_sdk_streaming(
                 message=item["message"],
                 session_id=item.get("session_id"),
                 send_ref=item.get("send_ref"),
@@ -463,6 +499,10 @@ async def _handle_async_item(item: dict):
                     "send_ref": item.get("send_ref"),
                     "namespace": item.get("namespace"),
                     "agent_ref": item.get("agent_ref"),
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                    "model": usage.get("model", ""),
                 }
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as http:

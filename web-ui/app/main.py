@@ -347,6 +347,26 @@ async def delete_provider(agent_ref: str):
     return {"deleted": deleted}
 
 
+# ── Usage / cost tracking ─────────────────────────────────────────────────────
+
+@app.get("/usage")
+async def get_usage(agent_ref: str = Query(...)):
+    """Return aggregated token usage and estimated cost for an agent."""
+    try:
+        return k8s_client.get_usage_summary(agent_ref, settings.namespace)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/usage/sessions")
+async def get_session_usage(agent_ref: str = Query(...)):
+    """Return per-session token usage for an agent."""
+    try:
+        return k8s_client.list_session_usage(agent_ref, settings.namespace)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/cancel")
 async def cancel_send(send_ref: str = Query(...), agent_ref: str = Query(...)):
     """Create a KubeCopilotCancel to stop an in-flight send."""
