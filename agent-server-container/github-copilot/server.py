@@ -43,8 +43,7 @@ if _otel_enabled:
     trace.set_tracer_provider(_provider)
     _tracer = trace.get_tracer("kubecopilot/agent-server")
 else:
-    from opentelemetry import trace as _trace_noop  # noqa: F401 — kept for type hints
-    _tracer = None  # type: ignore[assignment]
+    _tracer = None
 
 
 def _start_span(name: str, attributes: dict | None = None):
@@ -311,6 +310,10 @@ async def _run_sdk_streaming(
     # Collect response via events
     done = asyncio.Event()
     cancelled = False
+    # _tool_spans is local to this invocation (one per concurrent SDK session),
+    # so there are no cross-session data races. Spans are keyed by tool_name; if
+    # the same tool is invoked twice within a single session before the first
+    # execution completes, the earlier span is replaced (rare in practice).
     _tool_spans: dict[str, Any] = {}  # tool_name → active span for execution tracking
 
     def on_event(event):

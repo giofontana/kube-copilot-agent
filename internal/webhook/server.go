@@ -19,21 +19,21 @@ limitations under the License.
 package webhook
 
 import (
-"context"
-"encoding/json"
-"fmt"
-"net/http"
-"strconv"
-"time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"time"
 
-"go.opentelemetry.io/otel"
-"go.opentelemetry.io/otel/attribute"
-"go.opentelemetry.io/otel/codes"
-metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-"sigs.k8s.io/controller-runtime/pkg/client"
-logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-agentv1 "github.com/gfontana/kube-copilot-agent/api/v1"
+	agentv1 "github.com/gfontana/kube-copilot-agent/api/v1"
 )
 
 var tracer = otel.Tracer("kubecopilot/webhook")
@@ -50,304 +50,312 @@ var log = logf.Log.WithName("webhook-server")
 
 // ResponsePayload is the JSON body the agent POSTs when a queued response is ready.
 type ResponsePayload struct {
-QueueID   string `json:"queue_id"`
-SessionID string `json:"session_id"`
-Prompt    string `json:"prompt"`
-Response  string `json:"response"`
-SendRef   string `json:"send_ref,omitempty"`
-Namespace string `json:"namespace,omitempty"`
-AgentRef  string `json:"agent_ref,omitempty"`
+	QueueID   string `json:"queue_id"`
+	SessionID string `json:"session_id"`
+	Prompt    string `json:"prompt"`
+	Response  string `json:"response"`
+	SendRef   string `json:"send_ref,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	AgentRef  string `json:"agent_ref,omitempty"`
 }
 
 // Server is a lightweight HTTP server that listens for agent webhook calls.
 type Server struct {
-k8sClient client.Client
-addr      string
+	k8sClient client.Client
+	addr      string
 }
 
 // New creates a new webhook Server.
 func New(k8sClient client.Client, addr string) *Server {
-return &Server{k8sClient: k8sClient, addr: addr}
+	return &Server{k8sClient: k8sClient, addr: addr}
 }
 
 // Start runs the HTTP server. It blocks until the context is cancelled.
 func (s *Server) Start(ctx context.Context) error {
-mux := http.NewServeMux()
-mux.HandleFunc("/response", instrument("response", s.handleResponse))
-mux.HandleFunc("/chunk", instrument("chunk", s.handleChunk))
-mux.HandleFunc("/notification", instrument("notification", s.handleNotification))
-mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-w.WriteHeader(http.StatusOK)
-})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/response", instrument("response", s.handleResponse))
+	mux.HandleFunc("/chunk", instrument("chunk", s.handleChunk))
+	mux.HandleFunc("/notification", instrument("notification", s.handleNotification))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 
-srv := &http.Server{
-Addr:    s.addr,
-Handler: mux,
-}
+	srv := &http.Server{
+		Addr:    s.addr,
+		Handler: mux,
+	}
 
-go func() {
-<-ctx.Done()
-shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
-_ = srv.Shutdown(shutCtx)
-}()
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
+	}()
 
-log.Info("Starting webhook server", "addr", s.addr)
-if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-return fmt.Errorf("webhook server failed: %w", err)
-}
-return nil
+	log.Info("Starting webhook server", "addr", s.addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("webhook server failed: %w", err)
+	}
+	return nil
 }
 
 // instrument wraps an HTTP handler with Prometheus metrics and OTEL tracing.
 func instrument(handlerName string, next func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
-return func(w http.ResponseWriter, r *http.Request) {
-ctx, span := tracer.Start(r.Context(), handlerName)
-defer span.End()
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := tracer.Start(r.Context(), handlerName)
+		defer span.End()
 
-rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		start := time.Now()
 
-next(rw, r.WithContext(ctx))
+		next(rw, r.WithContext(ctx))
 
-duration := time.Since(start).Seconds()
-status := strconv.Itoa(rw.statusCode)
+		duration := time.Since(start).Seconds()
+		status := strconv.Itoa(rw.statusCode)
 
-webhookRequestsTotal.WithLabelValues(handlerName, status).Inc()
-webhookDurationSeconds.WithLabelValues(handlerName).Observe(duration)
+		webhookRequestsTotal.WithLabelValues(handlerName, status).Inc()
+		webhookDurationSeconds.WithLabelValues(handlerName).Observe(duration)
 
-span.SetAttributes(
-attribute.String("http.method", r.Method),
-attribute.Int("http.status_code", rw.statusCode),
-)
-if rw.statusCode >= 400 {
-span.SetStatus(codes.Error, http.StatusText(rw.statusCode))
-}
-}
+		span.SetAttributes(
+			attribute.String("http.method", r.Method),
+			attribute.Int("http.status_code", rw.statusCode),
+		)
+		if rw.statusCode >= 400 {
+			span.SetStatus(codes.Error, http.StatusText(rw.statusCode))
+		}
+	}
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.
+// It also implements http.Flusher so handlers that call Flush() still work.
 type responseWriter struct {
-http.ResponseWriter
-statusCode int
+	http.ResponseWriter
+	statusCode int
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
-rw.statusCode = code
-rw.ResponseWriter.WriteHeader(code)
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush delegates to the underlying ResponseWriter if it implements http.Flusher.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (s *Server) handleResponse(w http.ResponseWriter, r *http.Request) {
-if r.Method != http.MethodPost {
-http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-return
-}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-var payload ResponsePayload
-if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-log.Error(err, "failed to decode webhook payload")
-http.Error(w, "bad request", http.StatusBadRequest)
-return
-}
+	var payload ResponsePayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Error(err, "failed to decode webhook payload")
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 
-namespace := payload.Namespace
-if namespace == "" {
-namespace = defaultNamespace
-}
+	namespace := payload.Namespace
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
 
-// Build a unique name for the KubeCopilotResponse from the queue_id (truncated).
-queueShort := payload.QueueID
-if len(queueShort) > 8 {
-queueShort = queueShort[:8]
-}
-name := fmt.Sprintf("resp-%s", queueShort)
+	// Build a unique name for the KubeCopilotResponse from the queue_id (truncated).
+	queueShort := payload.QueueID
+	if len(queueShort) > 8 {
+		queueShort = queueShort[:8]
+	}
+	name := fmt.Sprintf("resp-%s", queueShort)
 
-now := metav1.Now()
-resp := &agentv1.KubeCopilotResponse{
-ObjectMeta: metav1.ObjectMeta{
-Name:      name,
-Namespace: namespace,
-Labels: map[string]string{
-"kubecopilot.io/session-id": payload.SessionID,
-"kubecopilot.io/agent-ref":  payload.AgentRef,
-"kubecopilot.io/send-ref":   payload.SendRef,
-},
-},
-Spec: agentv1.KubeCopilotResponseSpec{
-AgentRef:  payload.AgentRef,
-SessionID: payload.SessionID,
-Prompt:    payload.Prompt,
-Response:  payload.Response,
-SendRef:   payload.SendRef,
-},
-}
+	now := metav1.Now()
+	resp := &agentv1.KubeCopilotResponse{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kubecopilot.io/session-id": payload.SessionID,
+				"kubecopilot.io/agent-ref":  payload.AgentRef,
+				"kubecopilot.io/send-ref":   payload.SendRef,
+			},
+		},
+		Spec: agentv1.KubeCopilotResponseSpec{
+			AgentRef:  payload.AgentRef,
+			SessionID: payload.SessionID,
+			Prompt:    payload.Prompt,
+			Response:  payload.Response,
+			SendRef:   payload.SendRef,
+		},
+	}
 
-ctx := r.Context()
-if err := s.k8sClient.Create(ctx, resp); err != nil {
-log.Error(err, "failed to create KubeCopilotResponse", "name", name, "namespace", namespace)
-http.Error(w, "failed to create response object", http.StatusInternalServerError)
-return
-}
+	ctx := r.Context()
+	if err := s.k8sClient.Create(ctx, resp); err != nil {
+		log.Error(err, "failed to create KubeCopilotResponse", "name", name, "namespace", namespace)
+		http.Error(w, "failed to create response object", http.StatusInternalServerError)
+		return
+	}
 
-// Stamp the createdAt status
-resp.Status.CreatedAt = &now
-_ = s.k8sClient.Status().Update(ctx, resp)
+	// Stamp the createdAt status
+	resp.Status.CreatedAt = &now
+	_ = s.k8sClient.Status().Update(ctx, resp)
 
-log.Info("Created KubeCopilotResponse", "name", name, "namespace", namespace, "sendRef", payload.SendRef)
-w.WriteHeader(http.StatusCreated)
-_ = json.NewEncoder(w).Encode(map[string]string{"name": name, "namespace": namespace})
+	log.Info("Created KubeCopilotResponse", "name", name, "namespace", namespace, "sendRef", payload.SendRef)
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"name": name, "namespace": namespace})
 }
 
 // ChunkPayload is the JSON body the agent POSTs for each streaming chunk.
 type ChunkPayload struct {
-SendRef   string `json:"send_ref"`
-SessionID string `json:"session_id,omitempty"`
-AgentRef  string `json:"agent_ref,omitempty"`
-Namespace string `json:"namespace,omitempty"`
-Sequence  int    `json:"sequence"`
-ChunkType string `json:"chunk_type"`
-Content   string `json:"content"`
+	SendRef   string `json:"send_ref"`
+	SessionID string `json:"session_id,omitempty"`
+	AgentRef  string `json:"agent_ref,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Sequence  int    `json:"sequence"`
+	ChunkType string `json:"chunk_type"`
+	Content   string `json:"content"`
 }
 
 func (s *Server) handleChunk(w http.ResponseWriter, r *http.Request) {
-if r.Method != http.MethodPost {
-http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-return
-}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-var payload ChunkPayload
-if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-log.Error(err, "failed to decode chunk payload")
-http.Error(w, "bad request", http.StatusBadRequest)
-return
-}
+	var payload ChunkPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Error(err, "failed to decode chunk payload")
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 
-namespace := payload.Namespace
-if namespace == "" {
-namespace = defaultNamespace
-}
+	namespace := payload.Namespace
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
 
-sendShort := payload.SendRef
-if len(sendShort) > 12 {
-sendShort = sendShort[len(sendShort)-12:]
-}
-name := fmt.Sprintf("chunk-%s-%04d", sendShort, payload.Sequence)
+	sendShort := payload.SendRef
+	if len(sendShort) > 12 {
+		sendShort = sendShort[len(sendShort)-12:]
+	}
+	name := fmt.Sprintf("chunk-%s-%04d", sendShort, payload.Sequence)
 
-chunk := &agentv1.KubeCopilotChunk{
-ObjectMeta: metav1.ObjectMeta{
-Name:      name,
-Namespace: namespace,
-Labels: map[string]string{
-"kubecopilot.io/session-id": payload.SessionID,
-"kubecopilot.io/agent-ref":  payload.AgentRef,
-"kubecopilot.io/send-ref":   payload.SendRef,
-},
-},
-Spec: agentv1.KubeCopilotChunkSpec{
-AgentRef:  payload.AgentRef,
-SessionID: payload.SessionID,
-SendRef:   payload.SendRef,
-Sequence:  payload.Sequence,
-ChunkType: payload.ChunkType,
-Content:   payload.Content,
-},
-}
+	chunk := &agentv1.KubeCopilotChunk{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kubecopilot.io/session-id": payload.SessionID,
+				"kubecopilot.io/agent-ref":  payload.AgentRef,
+				"kubecopilot.io/send-ref":   payload.SendRef,
+			},
+		},
+		Spec: agentv1.KubeCopilotChunkSpec{
+			AgentRef:  payload.AgentRef,
+			SessionID: payload.SessionID,
+			SendRef:   payload.SendRef,
+			Sequence:  payload.Sequence,
+			ChunkType: payload.ChunkType,
+			Content:   payload.Content,
+		},
+	}
 
-ctx := r.Context()
-if err := s.k8sClient.Create(ctx, chunk); err != nil {
-log.Error(err, "failed to create KubeCopilotChunk", "name", name)
-http.Error(w, "failed to create chunk", http.StatusInternalServerError)
-return
-}
+	ctx := r.Context()
+	if err := s.k8sClient.Create(ctx, chunk); err != nil {
+		log.Error(err, "failed to create KubeCopilotChunk", "name", name)
+		http.Error(w, "failed to create chunk", http.StatusInternalServerError)
+		return
+	}
 
-w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusCreated)
 }
 
 // NotificationPayload is the JSON body the agent POSTs for one-way notifications.
 type NotificationPayload struct {
-SessionID        string `json:"session_id"`
-AgentRef         string `json:"agent_ref,omitempty"`
-Namespace        string `json:"namespace,omitempty"`
-Message          string `json:"message"`
-NotificationType string `json:"notification_type,omitempty"`
-Title            string `json:"title,omitempty"`
-TaskRef          string `json:"task_ref,omitempty"`
+	SessionID        string `json:"session_id"`
+	AgentRef         string `json:"agent_ref,omitempty"`
+	Namespace        string `json:"namespace,omitempty"`
+	Message          string `json:"message"`
+	NotificationType string `json:"notification_type,omitempty"`
+	Title            string `json:"title,omitempty"`
+	TaskRef          string `json:"task_ref,omitempty"`
 }
 
 func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
-if r.Method != http.MethodPost {
-http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-return
-}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-var payload NotificationPayload
-if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-log.Error(err, "Failed to decode notification payload")
-http.Error(w, "bad request", http.StatusBadRequest)
-return
-}
+	var payload NotificationPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		log.Error(err, "Failed to decode notification payload")
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
 
-if payload.SessionID == "" || payload.Message == "" || payload.AgentRef == "" {
-http.Error(w, "session_id, agent_ref, and message are required", http.StatusBadRequest)
-return
-}
+	if payload.SessionID == "" || payload.Message == "" || payload.AgentRef == "" {
+		http.Error(w, "session_id, agent_ref, and message are required", http.StatusBadRequest)
+		return
+	}
 
-namespace := payload.Namespace
-if namespace == "" {
-namespace = defaultNamespace
-}
+	namespace := payload.Namespace
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
 
-notifType := payload.NotificationType
-if notifType == "" {
-notifType = "info"
-}
+	notifType := payload.NotificationType
+	if notifType == "" {
+		notifType = "info"
+	}
 
-// Validate notification type
-validTypes := map[string]bool{"info": true, "success": true, "warning": true, "error": true}
-if !validTypes[notifType] {
-http.Error(w, "notification_type must be one of: info, success, warning, error", http.StatusBadRequest)
-return
-}
+	// Validate notification type
+	validTypes := map[string]bool{"info": true, "success": true, "warning": true, "error": true}
+	if !validTypes[notifType] {
+		http.Error(w, "notification_type must be one of: info, success, warning, error", http.StatusBadRequest)
+		return
+	}
 
-now := metav1.Now()
-name := fmt.Sprintf("notif-%s-%d", payload.SessionID, now.UnixMilli())
-if len(name) > 63 {
-name = name[:63]
-}
+	now := metav1.Now()
+	name := fmt.Sprintf("notif-%s-%d", payload.SessionID, now.UnixMilli())
+	if len(name) > 63 {
+		name = name[:63]
+	}
 
-notif := &agentv1.KubeCopilotNotification{
-ObjectMeta: metav1.ObjectMeta{
-Name:      name,
-Namespace: namespace,
-Labels: map[string]string{
-"kubecopilot.io/session-id": payload.SessionID,
-"kubecopilot.io/agent-ref":  payload.AgentRef,
-},
-},
-Spec: agentv1.KubeCopilotNotificationSpec{
-AgentRef:         payload.AgentRef,
-SessionID:        payload.SessionID,
-Message:          payload.Message,
-NotificationType: notifType,
-Title:            payload.Title,
-TaskRef:          payload.TaskRef,
-},
-}
+	notif := &agentv1.KubeCopilotNotification{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kubecopilot.io/session-id": payload.SessionID,
+				"kubecopilot.io/agent-ref":  payload.AgentRef,
+			},
+		},
+		Spec: agentv1.KubeCopilotNotificationSpec{
+			AgentRef:         payload.AgentRef,
+			SessionID:        payload.SessionID,
+			Message:          payload.Message,
+			NotificationType: notifType,
+			Title:            payload.Title,
+			TaskRef:          payload.TaskRef,
+		},
+	}
 
-ctx := r.Context()
-if err := s.k8sClient.Create(ctx, notif); err != nil {
-log.Error(err, "Failed to create KubeCopilotNotification", "name", name, "namespace", namespace)
-http.Error(w, "failed to create notification object", http.StatusInternalServerError)
-return
-}
+	ctx := r.Context()
+	if err := s.k8sClient.Create(ctx, notif); err != nil {
+		log.Error(err, "Failed to create KubeCopilotNotification", "name", name, "namespace", namespace)
+		http.Error(w, "failed to create notification object", http.StatusInternalServerError)
+		return
+	}
 
-// Stamp the createdAt status
-notif.Status.CreatedAt = &now
-if err := s.k8sClient.Status().Update(ctx, notif); err != nil {
-log.Error(err, "Failed to update KubeCopilotNotification status", "name", name, "namespace", namespace)
-}
+	// Stamp the createdAt status
+	notif.Status.CreatedAt = &now
+	if err := s.k8sClient.Status().Update(ctx, notif); err != nil {
+		log.Error(err, "Failed to update KubeCopilotNotification status", "name", name, "namespace", namespace)
+	}
 
-log.Info("Created KubeCopilotNotification", "name", name, "namespace", namespace, "sessionID", payload.SessionID)
-w.WriteHeader(http.StatusCreated)
-_ = json.NewEncoder(w).Encode(map[string]string{"name": name, "namespace": namespace})
+	log.Info("Created KubeCopilotNotification", "name", name, "namespace", namespace, "sessionID", payload.SessionID)
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"name": name, "namespace": namespace})
 }

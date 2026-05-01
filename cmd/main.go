@@ -38,8 +38,8 @@ import (
 
 	agentv1 "github.com/gfontana/kube-copilot-agent/api/v1"
 	"github.com/gfontana/kube-copilot-agent/internal/controller"
-	agentwebhook "github.com/gfontana/kube-copilot-agent/internal/webhook"
 	agentOtel "github.com/gfontana/kube-copilot-agent/internal/otel"
+	agentwebhook "github.com/gfontana/kube-copilot-agent/internal/webhook"
 	// +kubebuilder:scaffold:imports
 )
 
