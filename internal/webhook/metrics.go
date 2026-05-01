@@ -41,11 +41,13 @@ var (
 		[]string{"agent", "model"},
 	)
 
-	// sessionsTotal counts completed agent sessions (one increment per KubeCopilotResponse).
+	// sessionsTotal counts completed agent responses (one increment per KubeCopilotResponse).
+	// A session may span multiple responses; use this counter as a proxy for request volume
+	// grouped by agent.
 	sessionsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "kubecopilot_sessions_total",
-			Help: "Total number of completed agent sessions (responses received), partitioned by agent.",
+			Help: "Total number of completed agent responses received, partitioned by agent. A conversation session may produce multiple responses.",
 		},
 		[]string{"agent"},
 	)

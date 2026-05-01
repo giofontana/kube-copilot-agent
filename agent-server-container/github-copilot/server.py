@@ -273,13 +273,10 @@ async def _run_sdk_streaming(
         etype = event.type.value if hasattr(event.type, "value") else str(event.type)
         data = event.data if hasattr(event, "data") else None
 
-        # Session ID extraction
-        if etype == "session.created" and data and hasattr(data, "session_id"):
-            resolved_session_id = data.session_id or resolved_session_id
-
-        # Token usage — the SDK may emit a usage event (e.g. "session.usage",
-        # "conversation.turn_complete") or attach usage to "session.idle".
-        # We check any event that carries a usage-like attribute.
+        # Token usage — the SDK may emit usage data on various events (e.g. "session.usage",
+        # "conversation.turn_complete", or via "session.idle"). Extract from any event that
+        # carries a usage attribute; this is intentionally independent of the event-type
+        # dispatch chain below so usage is captured regardless of which event delivers it.
         if data is not None:
             event_usage = getattr(data, "usage", None)
             if event_usage is not None:
@@ -301,8 +298,12 @@ async def _run_sdk_streaming(
                 if model_from_event and not usage["model"]:
                     usage["model"] = model_from_event
 
+        # Event-type dispatch — mutually exclusive handling for each SDK event type.
+        if etype == "session.created" and data and hasattr(data, "session_id"):
+            resolved_session_id = data.session_id or resolved_session_id
+
         # Streaming text deltas
-        if etype == "assistant.message_delta":
+        elif etype == "assistant.message_delta":
             delta = getattr(data, "delta_content", "") or ""
             if delta:
                 response_text += delta

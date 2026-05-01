@@ -45,18 +45,18 @@ var log = logf.Log.WithName("webhook-server")
 
 // ResponsePayload is the JSON body the agent POSTs when a queued response is ready.
 type ResponsePayload struct {
-	QueueID      string       `json:"queue_id"`
-	SessionID    string       `json:"session_id"`
-	Prompt       string       `json:"prompt"`
-	Response     string       `json:"response"`
-	SendRef      string       `json:"send_ref,omitempty"`
-	Namespace    string       `json:"namespace,omitempty"`
-	AgentRef     string       `json:"agent_ref,omitempty"`
-	InputTokens  int64        `json:"input_tokens,omitempty"`
-	OutputTokens int64        `json:"output_tokens,omitempty"`
-	TotalTokens  int64        `json:"total_tokens,omitempty"`
-	Cost         string       `json:"estimated_cost,omitempty"`
-	Model        string       `json:"model,omitempty"`
+	QueueID      string `json:"queue_id"`
+	SessionID    string `json:"session_id"`
+	Prompt       string `json:"prompt"`
+	Response     string `json:"response"`
+	SendRef      string `json:"send_ref,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
+	AgentRef     string `json:"agent_ref,omitempty"`
+	InputTokens  int64  `json:"input_tokens,omitempty"`
+	OutputTokens int64  `json:"output_tokens,omitempty"`
+	TotalTokens  int64  `json:"total_tokens,omitempty"`
+	Cost         string `json:"estimated_cost,omitempty"`
+	Model        string `json:"model,omitempty"`
 }
 
 // Server is a lightweight HTTP server that listens for agent webhook calls.

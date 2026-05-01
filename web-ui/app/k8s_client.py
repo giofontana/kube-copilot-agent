@@ -441,6 +441,9 @@ def list_session_usage(agent_ref: str, namespace: str) -> list[dict]:
         s["estimated_cost"] = round(s["estimated_cost"], 6)
     sessions.sort(key=lambda s: s["last_activity"], reverse=True)
     return sessions
+
+
+def list_running_sessions(agent_ref: str, namespace: str) -> list[dict]:
     """
     Return KubeCopilotSend objects that have no corresponding KubeCopilotResponse yet.
     These represent in-progress requests.
